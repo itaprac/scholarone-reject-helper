@@ -1,0 +1,9 @@
+.DS_Store
+node_modules/
+playwright-profile/
+logs/
+.env
+login.env
+ui-settings.json
+credentials.txt
+secrets/

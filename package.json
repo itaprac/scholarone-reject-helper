@@ -1,0 +1,17 @@
+{
+  "name": "scholarone-auto-reject",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install-browsers": "playwright install chromium",
+    "ui": "node src/ui-server.js",
+    "dryrun": "node src/auto-reject.js --headed --dry-run",
+    "reject": "node src/auto-reject.js --headed --save-and-send",
+    "reject:from-report": "node src/auto-reject.js --headed --save-and-send --require-targets",
+    "codegen": "playwright codegen https://mc.manuscriptcentral.com/kes"
+  },
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}
