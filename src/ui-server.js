@@ -12,7 +12,8 @@ const uiRoot = path.join(projectRoot, "ui");
 const reportsDir = path.join(projectRoot, "logs", "reports");
 const autoRejectScript = path.join(projectRoot, "src", "auto-reject.js");
 const settingsPath = path.join(projectRoot, "ui-settings.json");
-const port = Number.parseInt(process.env.UI_PORT || "3131", 10);
+const preferredPort = Number.parseInt(process.env.UI_PORT || "3131", 10);
+const maxPort = preferredPort + 20;
 const envDefaults = loadEnvFile(path.join(projectRoot, ".env"));
 
 const jobs = new Map();
@@ -120,8 +121,23 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, () => {
-  console.log(`ScholarOne helper UI: http://localhost:${port}`);
+let currentPort = preferredPort;
+
+server.on("error", (error) => {
+  if (error.code === "EADDRINUSE" && currentPort < maxPort) {
+    const nextPort = currentPort + 1;
+    console.warn(`Port ${currentPort} jest zajety, probuje ${nextPort}...`);
+    currentPort = nextPort;
+    server.listen(currentPort);
+    return;
+  }
+
+  console.error(error);
+  process.exit(1);
+});
+
+server.listen(currentPort, () => {
+  console.log(`ScholarOne helper UI: http://localhost:${currentPort}`);
 });
 
 async function listReports() {
