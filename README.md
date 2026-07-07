@@ -77,6 +77,9 @@ W panelu mozesz:
 Przed akcja, ktora naprawde odrzuca artykuly, UI pokazuje dodatkowe okno potwierdzenia.
 
 Pierwsze uruchomienie otwiera osobny profil Chromium w `playwright-profile/`.
+Przy pierwszym logowaniu ScholarOne moze poprosic o kod z maila. Wpisz kod i
+zaznacz opcje `Remember this device`, zeby kolejne uruchomienia nie wymuszaly
+ponownie weryfikacji.
 
 ## Dry-run z terminala
 
