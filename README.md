@@ -47,7 +47,8 @@ LOGIN_PASSWORD=twoje-haslo
 
 ## Jak dziala decyzja
 
-Skrypt zawsze zostawia manuskrypty konczace sie na `.R1` albo `.R2`.
+Skrypt zawsze zostawia manuskrypty konczace sie na `.R` + liczba, np. `.R1`,
+`.R2`, `.R3` albo `.R10`.
 
 Pozostale manuskrypty sa kandydatami do rejectu, jesli:
 

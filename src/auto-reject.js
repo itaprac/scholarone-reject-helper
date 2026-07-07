@@ -938,7 +938,7 @@ function bodyHasManuscriptId(text, manuscriptId) {
 function createReportSummary() {
   return {
     candidates: [],
-    skippedR1R2: [],
+    skippedRevision: [],
     skippedOther: [],
     manualReview: [],
   };
@@ -951,7 +951,7 @@ function recordReportDecision(report, details) {
     reason: details.reason,
     submittedDate: details.submittedDate || null,
     hasUnusualActivity: Boolean(details.hasUnusualActivity),
-    isR1OrR2: Boolean(details.isR1OrR2),
+    isRevision: Boolean(details.isRevision),
     submittedMoreThanLimit: Boolean(details.submittedMoreThanLimit),
   };
 
@@ -960,8 +960,8 @@ function recordReportDecision(report, details) {
     return;
   }
 
-  if (details.action === "skip" && details.isR1OrR2) {
-    report.skippedR1R2.push(entry);
+  if (details.action === "skip" && details.isRevision) {
+    report.skippedRevision.push(entry);
     return;
   }
 
@@ -1997,7 +1997,7 @@ async function inspectCurrentManuscript(page) {
   const manuscriptId = extractManuscriptId(bodyText);
   const submittedDate = extractSubmittedDate(bodyText);
   const hasUnusualActivity = /high\s+rate\s+of\s+unusual\s+activity/i.test(bodyText);
-  const isR1OrR2 = manuscriptId ? /\.R[12]$/i.test(manuscriptId) : false;
+  const isRevision = manuscriptId ? /\.R\d+$/i.test(manuscriptId) : false;
 
   if (!manuscriptId) {
     return {
@@ -2006,18 +2006,18 @@ async function inspectCurrentManuscript(page) {
       manuscriptId: null,
       submittedDate: submittedDate ? submittedDate.toISOString() : null,
       hasUnusualActivity,
-      isR1OrR2,
+      isRevision,
     };
   }
 
-  if (isR1OrR2) {
+  if (isRevision) {
     return {
       action: "skip",
-      reason: "Manuscript ID konczy sie .R1 albo .R2.",
+      reason: "Manuscript ID jest rewizja (.R + liczba).",
       manuscriptId,
       submittedDate: submittedDate ? submittedDate.toISOString() : null,
       hasUnusualActivity,
-      isR1OrR2,
+      isRevision,
     };
   }
 
@@ -2040,18 +2040,18 @@ async function inspectCurrentManuscript(page) {
       manuscriptId,
       submittedDate: submittedDate ? submittedDate.toISOString() : null,
       hasUnusualActivity,
-      isR1OrR2,
+      isRevision,
       submittedMoreThanLimit,
     };
   }
 
   return {
     action: "skip",
-    reason: "Brak .R1/.R2, ale nie ma unusual activity ani daty starszej niz limit.",
+    reason: "Brak rewizji .R + liczba, ale nie ma unusual activity ani daty starszej niz limit.",
     manuscriptId,
     submittedDate: submittedDate ? submittedDate.toISOString() : null,
     hasUnusualActivity,
-    isR1OrR2,
+    isRevision,
     submittedMoreThanLimit,
   };
 }
@@ -3463,7 +3463,7 @@ function buildRunSummary(result) {
     checked: result.checked || 0,
     rejected: result.rejected || 0,
     wouldReject: report.candidates?.length || 0,
-    skippedR1R2: report.skippedR1R2?.length || 0,
+    skippedRevision: report.skippedRevision?.length || 0,
     skippedOther: report.skippedOther?.length || 0,
     manualReview: report.manualReview?.length || 0,
     targets: result.targets || null,
@@ -3491,7 +3491,7 @@ function collectArtifactRows(result) {
       reason: details.reason || entry.note || entry.progress?.status || entry.searchResult?.note || "",
       submittedDate: details.submittedDate || "",
       hasUnusualActivity: boolCsv(details.hasUnusualActivity),
-      isR1OrR2: boolCsv(details.isR1OrR2),
+      isRevision: boolCsv(details.isRevision),
       submittedMoreThanLimit: boolCsv(details.submittedMoreThanLimit),
     });
   }
@@ -3507,7 +3507,7 @@ function collectArtifactRows(result) {
       reason: result.note || "",
       submittedDate: "",
       hasUnusualActivity: "",
-      isR1OrR2: "",
+      isRevision: "",
       submittedMoreThanLimit: "",
     });
   }
@@ -3522,7 +3522,7 @@ function appendReportRows(rows, report, source) {
 
   const categories = [
     ["candidate", report.candidates || []],
-    ["skippedR1R2", report.skippedR1R2 || []],
+    ["skippedRevision", report.skippedRevision || []],
     ["skippedOther", report.skippedOther || []],
     ["manualReview", report.manualReview || []],
   ];
@@ -3539,7 +3539,7 @@ function appendReportRows(rows, report, source) {
         reason: entry.reason || "",
         submittedDate: entry.submittedDate || "",
         hasUnusualActivity: boolCsv(entry.hasUnusualActivity),
-        isR1OrR2: boolCsv(entry.isR1OrR2),
+        isRevision: boolCsv(entry.isRevision),
         submittedMoreThanLimit: boolCsv(entry.submittedMoreThanLimit),
       });
     }
@@ -3557,7 +3557,7 @@ function rowsToCsv(rows) {
     "reason",
     "submittedDate",
     "hasUnusualActivity",
-    "isR1OrR2",
+    "isRevision",
     "submittedMoreThanLimit",
   ];
   const lines = [headers.join(",")];
