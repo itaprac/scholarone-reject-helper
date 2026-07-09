@@ -6,6 +6,21 @@ const state = {
   configApplied: false,
 };
 
+const REPORT_COLUMN_COUNT = 5;
+const REPORT_STATUS_LABELS = {
+  dry_run_finished: "Dry run finished",
+  report_only_finished: "Report finished",
+  search_dry_run_finished: "Search dry run finished",
+  search_report_finished: "Search report finished",
+  search_reject_finished: "Reject finished",
+  no_more_view_details: "Queue completed",
+  max_checked_reached: "Check limit reached",
+  max_rejected_reached: "Reject limit reached",
+  reject_step_failed: "Reject step failed",
+  save_send_failed: "Send failed",
+  needs_manual_review: "Manual review needed",
+};
+
 const els = {
   statusLine: document.getElementById("statusLine"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -29,13 +44,13 @@ const els = {
   jobOutput: document.getElementById("jobOutput"),
 };
 
-els.refreshBtn.addEventListener("click", refresh);
-els.dryRunBtn.addEventListener("click", runDryRun);
-els.liveRunBtn.addEventListener("click", runLiveSend);
-els.sendReportBtn.addEventListener("click", sendSelectedReport);
-els.saveSettingsBtn.addEventListener("click", saveSettings);
-els.resetSettingsBtn.addEventListener("click", resetSettings);
-els.stopBtn.addEventListener("click", stopCurrentJob);
+bindAsyncClick(els.refreshBtn, refresh);
+bindAsyncClick(els.dryRunBtn, runDryRun);
+bindAsyncClick(els.liveRunBtn, runLiveSend);
+bindAsyncClick(els.sendReportBtn, sendSelectedReport);
+bindAsyncClick(els.saveSettingsBtn, saveSettings);
+bindAsyncClick(els.resetSettingsBtn, resetSettings);
+bindAsyncClick(els.stopBtn, stopCurrentJob);
 
 refresh().catch(showError);
 
@@ -70,6 +85,10 @@ async function refresh() {
 }
 
 async function runDryRun() {
+  if (!validateInputs([els.startUrl, els.maxChecked, els.olderDays, els.queuePage, els.slowMo])) {
+    return;
+  }
+
   const payload = await api("/api/run/dryrun", {
     method: "POST",
     body: JSON.stringify(scanOptions({ includeMaxRejected: false })),
@@ -78,6 +97,17 @@ async function runDryRun() {
 }
 
 async function runLiveSend() {
+  if (!validateInputs([
+    els.startUrl,
+    els.maxChecked,
+    els.olderDays,
+    els.queuePage,
+    els.slowMo,
+    els.maxRejected,
+  ])) {
+    return;
+  }
+
   if (!confirmDangerousAction("Uruchomic skanowanie i od razu odrzucac pasujace artykuly?")) {
     return;
   }
@@ -92,6 +122,9 @@ async function runLiveSend() {
 async function sendSelectedReport() {
   if (!state.selectedReportPath) {
     showError(new Error("Wybierz raport z tabeli."));
+    return;
+  }
+  if (!validateInputs([els.startUrl, els.olderDays, els.slowMo, els.maxRejected])) {
     return;
   }
   if (!confirmDangerousAction(`Odrzucic kandydatow z raportu?\n\n${state.selectedReportPath}`)) {
@@ -172,7 +205,7 @@ function renderReports() {
   if (state.reports.length === 0) {
     const row = document.createElement("tr");
     const cell = document.createElement("td");
-    cell.colSpan = 6;
+    cell.colSpan = REPORT_COLUMN_COUNT;
     cell.textContent = "Brak raportow. Uruchom dry run.";
     row.append(cell);
     els.reportsBody.append(row);
@@ -189,21 +222,25 @@ function renderReports() {
   for (const report of state.reports) {
     const row = document.createElement("tr");
     row.className = "report-row";
+    row.tabIndex = 0;
+    row.setAttribute("aria-selected", String(report.path === state.selectedReportPath));
     if (report.path === state.selectedReportPath) {
       row.classList.add("selected");
     }
-    row.addEventListener("click", () => {
-      state.selectedReportPath = report.path;
-      renderReports();
-      updateActionState();
+    row.addEventListener("click", () => selectReport(report.path));
+    row.addEventListener("keydown", (event) => {
+      if (!["Enter", " "].includes(event.key)) {
+        return;
+      }
+      event.preventDefault();
+      selectReport(report.path, { restoreFocus: true });
     });
 
     row.append(
       reportNameCell(report),
-      textCell(report.status || "-"),
+      textCell(reportStatusLabel(report.status)),
       textCell(String(report.checked)),
       countCell(report.candidates),
-      countCell(report.progressRejected),
       textCell(progressText(report)),
     );
     els.reportsBody.append(row);
@@ -215,10 +252,12 @@ function renderReports() {
 function reportNameCell(report) {
   const cell = document.createElement("td");
   const name = document.createElement("div");
-  name.textContent = report.filename;
+  name.className = "report-name";
+  name.textContent = formatReportDate(report.createdAt);
   const path = document.createElement("div");
   path.className = "path";
-  path.textContent = report.path;
+  path.textContent = report.filename;
+  path.title = report.path;
   cell.append(name, path);
   return cell;
 }
@@ -240,9 +279,39 @@ function countCell(value) {
 
 function progressText(report) {
   const parts = [];
-  if (report.progressRejected) parts.push(`rejected ${report.progressRejected}`);
+  if (report.progressRejected) parts.push(`sent ${report.progressRejected}`);
   if (report.progressSkipped) parts.push(`skipped ${report.progressSkipped}`);
-  return parts.length ? parts.join(", ") : "-";
+  return parts.length ? parts.join(", ") : "Not started";
+}
+
+function selectReport(reportPath, { restoreFocus = false } = {}) {
+  state.selectedReportPath = reportPath;
+  renderReports();
+  updateActionState();
+
+  if (restoreFocus) {
+    const selectedRow = Array.from(els.reportsBody.querySelectorAll("tr.report-row"))
+      .find((row) => row.getAttribute("aria-selected") === "true");
+    selectedRow?.focus();
+  }
+}
+
+function reportStatusLabel(status) {
+  if (!status) {
+    return "Unknown";
+  }
+  return REPORT_STATUS_LABELS[status] || status.replaceAll("_", " ");
+}
+
+function formatReportDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "Report";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function renderSelectedReport() {
@@ -251,13 +320,14 @@ function renderSelectedReport() {
     els.selectedReport.textContent = "No report selected";
     return;
   }
-  els.selectedReport.textContent = `${report.filename}: ${report.candidates || 0} candidates, ${report.progressRejected || 0} rejected`;
+  els.selectedReport.textContent = `${report.candidates || 0} candidates, ${report.progressRejected || 0} sent`;
 }
 
 function renderJob() {
   const job = state.currentJob;
   if (!job) {
     els.statusLine.textContent = "Ready";
+    els.statusLine.dataset.tone = "neutral";
     els.jobOutput.textContent = "No active job.";
     els.stopBtn.disabled = true;
     return;
@@ -265,6 +335,7 @@ function renderJob() {
 
   const status = `${job.type} ${job.status}`;
   els.statusLine.textContent = job.exitCode === null ? status : `${status}, exit ${job.exitCode}`;
+  els.statusLine.dataset.tone = job.status === "failed" ? "error" : "active";
   els.jobOutput.textContent = job.output || "Job started...";
   els.jobOutput.scrollTop = els.jobOutput.scrollHeight;
   els.stopBtn.disabled = !["running", "stopping"].includes(job.status);
@@ -279,7 +350,29 @@ function updateActionState() {
 
 function showError(error) {
   els.statusLine.textContent = error.message;
+  els.statusLine.dataset.tone = "error";
   console.error(error);
+}
+
+function bindAsyncClick(element, handler) {
+  element.addEventListener("click", () => {
+    handler().catch(showError);
+  });
+}
+
+function validateInputs(inputs) {
+  const invalidInput = inputs.find((input) => !input.checkValidity());
+  if (!invalidInput) {
+    return true;
+  }
+
+  const details = invalidInput.closest("details");
+  if (details) {
+    details.open = true;
+  }
+  invalidInput.focus();
+  invalidInput.reportValidity();
+  return false;
 }
 
 function valueOf(input) {
@@ -307,30 +400,23 @@ function setValue(input, value) {
 }
 
 function scanOptions({ includeMaxRejected }) {
-  return {
-    startUrl: valueOf(els.startUrl),
-    maxChecked: valueOf(els.maxChecked),
-    submittedOlderThanDays: valueOf(els.olderDays),
-    queueStartPage: valueOf(els.queuePage),
-    slowMo: valueOf(els.slowMo),
-    keepOpen: els.keepOpen.checked,
-    rejectMessage: valueOf(els.rejectMessage),
-    ...(includeMaxRejected ? { maxRejected: valueOf(els.maxRejected) } : {}),
-  };
+  const options = formOptions();
+  if (!includeMaxRejected) {
+    delete options.maxRejected;
+  }
+  return options;
 }
 
 function sendOptions() {
-  return {
-    startUrl: valueOf(els.startUrl),
-    submittedOlderThanDays: valueOf(els.olderDays),
-    slowMo: valueOf(els.slowMo),
-    maxRejected: valueOf(els.maxRejected),
-    keepOpen: els.keepOpen.checked,
-    rejectMessage: valueOf(els.rejectMessage),
-  };
+  const { maxChecked, queueStartPage, ...options } = formOptions();
+  return options;
 }
 
 function settingsOptions() {
+  return formOptions();
+}
+
+function formOptions() {
   return {
     startUrl: valueOf(els.startUrl),
     maxChecked: valueOf(els.maxChecked),

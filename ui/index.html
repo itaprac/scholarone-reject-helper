@@ -8,21 +8,25 @@
   </head>
   <body>
     <header class="topbar">
-      <div>
+      <div class="product-title">
         <h1>ScholarOne helper</h1>
-        <p id="statusLine">Ready</p>
       </div>
-      <button id="refreshBtn" type="button">Refresh</button>
+      <div class="topbar-status">
+        <p id="statusLine" role="status" aria-live="polite">Ready</p>
+        <button id="refreshBtn" type="button">Refresh</button>
+      </div>
     </header>
 
     <main>
-      <section class="band">
-        <h2>Run settings</h2>
-        <div class="form-grid">
-          <label class="wide">
-            Start URL
-            <input id="startUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
-          </label>
+      <section class="band run-section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">1. Configure</p>
+            <h2>Run settings</h2>
+            <p class="section-copy">Set the scan limits, then start with a dry run to create a report.</p>
+          </div>
+        </div>
+        <div class="form-grid core-settings">
           <label>
             Max checked
             <input id="maxChecked" type="number" min="1" value="50">
@@ -32,80 +36,102 @@
             <input id="olderDays" type="number" min="1" value="30">
           </label>
           <label>
-            Queue page
-            <input id="queuePage" type="number" min="1" placeholder="auto">
-          </label>
-          <label>
-            Slow ms
-            <input id="slowMo" type="number" min="0" value="500">
-          </label>
-          <label>
             Max rejected
             <input id="maxRejected" type="number" min="1" placeholder="no limit">
           </label>
-          <label class="checkbox-line">
-            <input id="keepOpen" type="checkbox">
-            Keep browser open
-          </label>
         </div>
-        <div class="actions">
-          <button id="dryRunBtn" type="button">Run dry run</button>
+
+        <details class="advanced-settings">
+          <summary>Advanced run settings</summary>
+          <div class="form-grid">
+            <label class="wide">
+              Start URL
+              <input id="startUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+            </label>
+            <label>
+              Queue page
+              <input id="queuePage" type="number" min="1" placeholder="auto">
+            </label>
+            <label>
+              Slow ms
+              <input id="slowMo" type="number" min="0" value="500">
+            </label>
+            <label class="checkbox-line">
+              <input id="keepOpen" type="checkbox">
+              Keep browser open
+            </label>
+          </div>
+        </details>
+
+        <div class="actions run-actions">
+          <button id="dryRunBtn" type="button" class="primary">Run dry run</button>
           <button id="liveRunBtn" type="button" class="danger">Run + reject</button>
+        </div>
+        <p class="action-help">Dry run only creates a report. Run + reject acts immediately and cannot be undone.</p>
+      </section>
+
+      <section class="band reports-section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">2. Review</p>
+            <h2>Reports</h2>
+            <p class="section-copy">Select a dry-run report before starting a report-based rejection job.</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">Generated ScholarOne reports</caption>
+            <thead>
+              <tr>
+                <th scope="col">Report</th>
+                <th scope="col">Status</th>
+                <th scope="col">Checked</th>
+                <th scope="col">Candidates</th>
+                <th scope="col">Progress</th>
+              </tr>
+            </thead>
+            <tbody id="reportsBody">
+              <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="report-action-bar">
+          <div>
+            <span class="selection-label">Selected report</span>
+            <strong id="selectedReport" aria-live="polite">No report selected</strong>
+          </div>
+          <button id="sendReportBtn" type="button" class="danger">Reject selected report</button>
         </div>
       </section>
 
-      <section class="band">
+      <section class="band job-section">
         <div class="section-title">
-          <h2>Settings</h2>
-          <span id="settingsStatus">Not saved</span>
+          <div>
+            <p class="eyebrow">3. Monitor</p>
+            <h2>Job</h2>
+          </div>
+          <button id="stopBtn" type="button" disabled>Stop</button>
+        </div>
+        <pre id="jobOutput">No active job.</pre>
+      </section>
+
+      <section class="band message-section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Message</p>
+            <h2>Reject email body</h2>
+            <p class="section-copy">This text is used for live and report-based rejection runs.</p>
+          </div>
+          <span id="settingsStatus" role="status" aria-live="polite">Not saved</span>
         </div>
         <label class="message-label">
-          Reject email body
+          <span class="sr-only">Reject email body</span>
           <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
         </label>
         <div class="actions">
           <button id="saveSettingsBtn" type="button">Save settings</button>
           <button id="resetSettingsBtn" type="button">Reset saved settings</button>
         </div>
-      </section>
-
-      <section class="band">
-        <div class="section-title">
-          <h2>Reports</h2>
-          <span id="selectedReport">No report selected</span>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Report</th>
-                <th>Status</th>
-                <th>Checked</th>
-                <th>Would reject</th>
-                <th>Rejected</th>
-                <th>Progress</th>
-              </tr>
-            </thead>
-            <tbody id="reportsBody">
-              <tr><td colspan="6">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="band">
-        <h2>Reject from report</h2>
-        <div class="actions">
-          <button id="sendReportBtn" type="button" class="danger">Reject selected report</button>
-        </div>
-      </section>
-
-      <section class="band">
-        <div class="section-title">
-          <h2>Job</h2>
-          <button id="stopBtn" type="button" disabled>Stop</button>
-        </div>
-        <pre id="jobOutput">No active job.</pre>
       </section>
     </main>
 

@@ -5,6 +5,8 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
+import { buildJobArgs } from "./job-args.js";
+import { validateRunOptions } from "./run-options.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -14,6 +16,7 @@ const autoRejectScript = path.join(projectRoot, "src", "auto-reject.js");
 const settingsPath = path.join(projectRoot, "ui-settings.json");
 const preferredPort = Number.parseInt(process.env.UI_PORT || "3131", 10);
 const maxPort = preferredPort + 20;
+const listenHost = "127.0.0.1";
 const envDefaults = loadEnvFile(path.join(projectRoot, ".env"));
 
 const jobs = new Map();
@@ -23,6 +26,9 @@ let nextJobId = 1;
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    if (url.pathname.startsWith("/api/") && !["GET", "HEAD"].includes(req.method || "")) {
+      assertSameOrigin(req);
+    }
 
     if (url.pathname === "/api/state" && req.method === "GET") {
       return sendJson(res, {
@@ -45,57 +51,25 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/run/dryrun" && req.method === "POST") {
       const body = await readJsonBody(req);
-      const args = [
-        "--headed",
-        "--dry-run",
-        ...optionArgs(body, {
-          "start-url": "startUrl",
-          "max-checked": "maxChecked",
-          "submitted-older-than-days": "submittedOlderThanDays",
-          "queue-start-page": "queueStartPage",
-          "slow-mo": "slowMo",
-        }),
-        ...(body.keepOpen ? ["--keep-open"] : []),
-      ];
+      validateRunOptions(body, "dryrun");
+      const args = buildJobArgs("dryrun", body);
       return sendJson(res, { job: startJob("dryrun", args) });
     }
 
     if (url.pathname === "/api/run/live" && req.method === "POST") {
       const body = await readJsonBody(req);
-      const args = [
-        "--headed",
-        "--save-and-send",
-        ...optionArgs(body, {
-          "start-url": "startUrl",
-          "max-checked": "maxChecked",
-          "submitted-older-than-days": "submittedOlderThanDays",
-          "queue-start-page": "queueStartPage",
-          "max-rejected": "maxRejected",
-          "slow-mo": "slowMo",
-          "reject-message": "rejectMessage",
-        }),
-        ...(body.keepOpen ? ["--keep-open"] : []),
-      ];
+      validateRunOptions(body, "live");
+      const args = buildJobArgs("live", body);
       return sendJson(res, { job: startJob("live-reject", args) });
     }
 
     if (url.pathname === "/api/run/send-from-report" && req.method === "POST") {
       const body = await readJsonBody(req);
+      validateRunOptions(body, "send-from-report");
       const reportPath = resolveReportPath(body.report);
-      const args = [
-        "--headed",
-        "--save-and-send",
-        "--require-targets",
-        `--reject-from-report=${relativeProjectPath(reportPath)}`,
-        ...optionArgs(body, {
-          "start-url": "startUrl",
-          "submitted-older-than-days": "submittedOlderThanDays",
-          "max-rejected": "maxRejected",
-          "slow-mo": "slowMo",
-          "reject-message": "rejectMessage",
-        }),
-        ...(body.keepOpen ? ["--keep-open"] : []),
-      ];
+      const args = buildJobArgs("send-from-report", body, {
+        report: relativeProjectPath(reportPath),
+      });
       return sendJson(res, { job: startJob("reject-from-report", args) });
     }
 
@@ -128,7 +102,7 @@ server.on("error", (error) => {
     const nextPort = currentPort + 1;
     console.warn(`Port ${currentPort} jest zajety, probuje ${nextPort}...`);
     currentPort = nextPort;
-    server.listen(currentPort);
+    server.listen(currentPort, listenHost);
     return;
   }
 
@@ -136,7 +110,7 @@ server.on("error", (error) => {
   process.exit(1);
 });
 
-server.listen(currentPort, () => {
+server.listen(currentPort, listenHost, () => {
   console.log(`ScholarOne helper UI: http://localhost:${currentPort}`);
 });
 
@@ -297,18 +271,6 @@ function publicJob(job) {
   };
 }
 
-function optionArgs(body, mapping) {
-  const args = [];
-  for (const [flag, key] of Object.entries(mapping)) {
-    const value = body[key];
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-    args.push(`--${flag}=${value}`);
-  }
-  return args;
-}
-
 function normalizeIntegerSetting(value, fallback, minimum = 1) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < minimum) {
@@ -394,6 +356,30 @@ function resolveReportPath(value) {
 
 function relativeProjectPath(filePath) {
   return path.relative(projectRoot, filePath).split(path.sep).join("/");
+}
+
+function assertSameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) {
+    return;
+  }
+
+  let originHost;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    throw forbidden("Niepoprawny naglowek Origin.");
+  }
+
+  if (originHost !== req.headers.host) {
+    throw forbidden("Zadanie zostalo odrzucone, bo pochodzi z innego originu.");
+  }
+}
+
+function forbidden(message) {
+  const error = new Error(message);
+  error.statusCode = 403;
+  return error;
 }
 
 async function readJsonBody(req) {

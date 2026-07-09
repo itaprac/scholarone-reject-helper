@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "install-browsers": "playwright install chromium",
+    "test": "node --test",
     "ui": "node src/ui-server.js",
     "dryrun": "node src/auto-reject.js --headed --dry-run",
     "reject": "node src/auto-reject.js --headed --save-and-send",
