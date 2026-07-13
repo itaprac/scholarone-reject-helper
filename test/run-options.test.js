@@ -54,6 +54,46 @@ test("rejects partial integers and invalid start URLs", () => {
   );
 });
 
+test("validates reviewer preparation and invitation batches", () => {
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewerQueue: "select",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "1",
+    reviewerSlowMo: "0",
+  }, "reviewers-prepare"));
+
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewerQueue: "invite",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "5",
+    reviewerSlowMo: "500",
+  }, "reviewers-invite"));
+
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerQueue: "combined",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "3",
+    reviewerSlowMo: "500",
+    reviewerRefreshWaitSeconds: "60",
+  }, "reviewers-invite"));
+});
+
+test("reviewer refresh wait must be at least one second", () => {
+  assertBadRequest(() => validateRunOptions({
+    reviewerQueue: "combined",
+    reviewerRefreshWaitSeconds: "0",
+  }, "reviewers-invite"), /reviewerRefreshWaitSeconds/);
+});
+
+test("safe reviewer preparation cannot silently become a batch", () => {
+  assertBadRequest(() => validateRunOptions({
+    reviewerQueue: "select",
+    reviewerMaxManuscripts: "2",
+  }, "reviewers-prepare"), /jeden manuskrypt/);
+});
+
 function assertBadRequest(callback, messagePattern) {
   assert.throws(callback, (error) => {
     assert.equal(error.statusCode, 400);

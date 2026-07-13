@@ -17,6 +17,18 @@ const MODE_FIELDS = {
     ["slowMo", 0],
     ["maxRejected", 1],
   ],
+  "reviewers-prepare": [
+    ["reviewersPerPaper", 1],
+    ["reviewerMaxManuscripts", 1],
+    ["reviewerSlowMo", 0],
+    ["reviewerRefreshWaitSeconds", 1],
+  ],
+  "reviewers-invite": [
+    ["reviewersPerPaper", 1],
+    ["reviewerMaxManuscripts", 1],
+    ["reviewerSlowMo", 0],
+    ["reviewerRefreshWaitSeconds", 1],
+  ],
 };
 
 export function validateRunOptions(body, mode) {
@@ -25,10 +37,19 @@ export function validateRunOptions(body, mode) {
     throw badRequest(`Nieznany tryb uruchomienia: ${mode}`);
   }
 
-  validateStartUrl(body.startUrl);
+  validateStartUrl(mode.startsWith("reviewers-") ? body.reviewerStartUrl : body.startUrl);
 
   for (const [key, minimum] of fields) {
     validateOptionalInteger(body[key], key, minimum);
+  }
+
+  if (mode.startsWith("reviewers-")) {
+    if (!["combined", "select", "invite"].includes(body.reviewerQueue)) {
+      throw badRequest("reviewerQueue musi wskazywać Combined, Select Reviewers albo Invite Reviewers.");
+    }
+    if (mode === "reviewers-prepare" && Number(body.reviewerMaxManuscripts || 1) !== 1) {
+      throw badRequest("Tryb przygotowania bez wysyłania obsługuje jeden manuskrypt na uruchomienie.");
+    }
   }
 }
 

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildJobArgs } from "../src/job-args.js";
+import { buildJobArgs, buildReviewerJobArgs } from "../src/job-args.js";
 
 const OPTIONS = {
   startUrl: "https://mc.manuscriptcentral.com/kes",
@@ -68,5 +68,64 @@ test("keeps optional empty values out of the argument list", () => {
     "--headed",
     "--save-and-send",
     "--max-checked=10",
+  ]);
+});
+
+test("builds a safe reviewer preparation run", () => {
+  assert.deepEqual(buildReviewerJobArgs("reviewers-prepare", {
+    reviewerQueue: "select",
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "1",
+    reviewerSlowMo: "500",
+    reviewerKeepOpen: true,
+  }), [
+    "--select-reviewers",
+    "--headed",
+    "--reviewer-queue=select",
+    "--start-url=https://mc.manuscriptcentral.com/kes",
+    "--reviewers-per-paper=10",
+    "--max-manuscripts=1",
+    "--slow-mo=500",
+    "--keep-open",
+  ]);
+});
+
+test("builds a reviewer invitation batch resumed from Invite Reviewers", () => {
+  assert.deepEqual(buildReviewerJobArgs("reviewers-invite", {
+    reviewerQueue: "invite",
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "4",
+    reviewerSlowMo: "250",
+    reviewerKeepOpen: false,
+  }), [
+    "--select-reviewers",
+    "--headed",
+    "--reviewer-queue=invite",
+    "--invite-all",
+    "--start-url=https://mc.manuscriptcentral.com/kes",
+    "--reviewers-per-paper=10",
+    "--max-manuscripts=4",
+    "--slow-mo=250",
+  ]);
+});
+
+test("builds a combined reviewer queue that resumes before selecting new papers", () => {
+  assert.deepEqual(buildReviewerJobArgs("reviewers-invite", {
+    reviewerQueue: "combined",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "3",
+    reviewerSlowMo: "500",
+    reviewerRefreshWaitSeconds: "120",
+  }), [
+    "--select-reviewers",
+    "--headed",
+    "--reviewer-queue=combined",
+    "--invite-all",
+    "--reviewers-per-paper=10",
+    "--max-manuscripts=3",
+    "--slow-mo=500",
+    "--refresh-wait-seconds=120",
   ]);
 });

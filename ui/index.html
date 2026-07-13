@@ -17,7 +17,13 @@
       </div>
     </header>
 
+    <nav class="mode-tabs" role="tablist" aria-label="Workflow">
+      <button id="rejectTab" class="mode-tab selected" type="button" role="tab" aria-selected="true" aria-controls="rejectPanel">Auto-reject</button>
+      <button id="reviewersTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewersPanel">Reviewers</button>
+    </nav>
+
     <main>
+      <div id="rejectPanel" role="tabpanel" aria-labelledby="rejectTab">
       <section class="band run-section">
         <div class="section-title">
           <div>
@@ -104,17 +110,6 @@
         </div>
       </section>
 
-      <section class="band job-section">
-        <div class="section-title">
-          <div>
-            <p class="eyebrow">3. Monitor</p>
-            <h2>Job</h2>
-          </div>
-          <button id="stopBtn" type="button" disabled>Stop</button>
-        </div>
-        <pre id="jobOutput">No active job.</pre>
-      </section>
-
       <section class="band message-section">
         <div class="section-title">
           <div>
@@ -132,6 +127,90 @@
           <button id="saveSettingsBtn" type="button">Save settings</button>
           <button id="resetSettingsBtn" type="button">Reset saved settings</button>
         </div>
+      </section>
+      </div>
+
+      <div id="reviewersPanel" role="tabpanel" aria-labelledby="reviewersTab" hidden>
+        <section class="band run-section reviewer-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Reviewer workflow</p>
+              <h2>Select and invite reviewers</h2>
+              <p class="section-copy">Process papers sequentially. Each paper must reach the reviewer target and pass invitation verification before the next one starts.</p>
+            </div>
+          </div>
+
+          <div class="form-grid reviewer-core-settings">
+            <label>
+              Source queue
+              <select id="reviewerQueue">
+                <option value="combined" selected>Combined: Invite, then Select</option>
+                <option value="select">Select Reviewers</option>
+                <option value="invite">Invite Reviewers</option>
+              </select>
+            </label>
+            <label>
+              Papers this run
+              <input id="reviewerMaxManuscripts" type="number" min="1" max="50" value="3">
+            </label>
+            <label>
+              Reviewers per paper
+              <input id="reviewersPerPaper" type="number" min="1" max="50" value="10">
+            </label>
+          </div>
+
+          <div class="operation-strip" aria-live="polite">
+            <div>
+              <span class="selection-label">Planned batch</span>
+              <strong id="reviewerBatchSummary">Up to 3 papers, 10 reviewers each, from Combined queue</strong>
+            </div>
+            <span class="operation-note">Combined resumes Invite Reviewers first, then takes new papers from Select Reviewers.</span>
+          </div>
+
+          <details class="advanced-settings">
+            <summary>Advanced reviewer settings</summary>
+            <div class="form-grid">
+              <label class="wide">
+                Start URL
+                <input id="reviewerStartUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+              </label>
+              <label>
+                Slow ms
+                <input id="reviewerSlowMo" type="number" min="0" value="500">
+              </label>
+              <label>
+                Refresh wait (seconds)
+                <input id="reviewerRefreshWaitSeconds" type="number" min="1" max="3600" value="60">
+              </label>
+              <label class="checkbox-line">
+                <input id="reviewerKeepOpen" type="checkbox">
+                Keep browser open after batch
+              </label>
+            </div>
+          </details>
+
+          <div class="actions run-actions">
+            <button id="prepareReviewersBtn" type="button">Prepare one paper</button>
+            <button id="inviteReviewersBtn" type="button" class="danger">Select + invite batch</button>
+          </div>
+          <p class="action-help"><strong>Prepare one paper</strong> opens the final popup but does not send. <strong>Select + invite batch</strong> sends invitations and verifies every paper before continuing.</p>
+
+          <div class="actions reviewer-settings-actions">
+            <button id="saveReviewerSettingsBtn" type="button">Save reviewer settings</button>
+            <span id="reviewerSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
+      </div>
+
+      <section class="band job-section">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Monitor</p>
+            <h2>Current job</h2>
+          </div>
+          <button id="stopBtn" type="button" disabled>Stop</button>
+        </div>
+        <pre id="jobOutput">No active job.</pre>
       </section>
     </main>
 

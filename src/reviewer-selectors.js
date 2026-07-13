@@ -1,0 +1,23 @@
+export const REVIEWER_SELECTORS = Object.freeze({
+  queueAction: "select[name^='SEL_MANUSCRIPT_DETAILS_JUMP_TO_TAB_']",
+  queuePagination: "select[name='page_select'][onchange*='ADMIN_VIEW_MANUSCRIPTS']",
+  queueCurrentPage: "input[name='CURRENT_PAGE_NO']",
+  reviewerRow: "input[name^='XIK_RP_ID']",
+  reviewerCurrentPage: "input[name='REV_CURRENT_PAGE_NO']",
+  reviewerPagination: "select[onchange*='REV_CURRENT_PAGE_NO']",
+  candidateAdd: "a:has(img[src$='/add.gif'])",
+  candidatePagination: "select[name='page_select'][onchange*='RL_CURRENT_PAGE_NO']",
+  candidateCurrentPage: "input[name='RL_CURRENT_PAGE_NO']",
+  refreshSearch: "a[href*='NUM_REQUESTED'][href*='RL_JUST_PAGED'][href*='XIK_CURRENT_DOCUMENT_TASK_ID']:has(img[src$='/refresh.gif'])",
+  createAndAdd: "a:has(img[src$='/create_add.gif'])",
+  existingEmailSaveAndAdd: [
+    "a:has(img[src*='save' i][src*='add' i])",
+    "a:has(img[src$='/save.gif' i])",
+    "a:has(img[alt*='Save and Add' i])",
+    "a:has(img[title*='Save and Add' i])",
+    "a:has-text('Save and Add')",
+  ].join(", "),
+  firstInviteAll: "a[href*='invite_all_popup']:has(img[src$='/invite_all.gif']):visible",
+  finalInviteAll: "a[href*='EN_MASS_INVITE_POPUP']:has(img[src$='/invite_all.gif']):visible",
+  inviteAll: "a:has(img[src$='/invite_all.gif'])",
+});

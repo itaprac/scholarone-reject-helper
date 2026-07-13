@@ -51,6 +51,30 @@ export function buildJobArgs(mode, body, { report = "" } = {}) {
   return args;
 }
 
+export function buildReviewerJobArgs(mode, body) {
+  if (!["reviewers-prepare", "reviewers-invite"].includes(mode)) {
+    throw new Error(`Nieznany tryb reviewerów: ${mode}`);
+  }
+
+  const args = ["--select-reviewers", "--headed"];
+  args.push(`--reviewer-queue=${body.reviewerQueue}`);
+  if (mode === "reviewers-invite") {
+    args.push("--invite-all");
+  }
+
+  args.push(...optionArgs(body, {
+    "start-url": "reviewerStartUrl",
+    "reviewers-per-paper": "reviewersPerPaper",
+    "max-manuscripts": "reviewerMaxManuscripts",
+    "slow-mo": "reviewerSlowMo",
+    "refresh-wait-seconds": "reviewerRefreshWaitSeconds",
+  }));
+  if (body.reviewerKeepOpen) {
+    args.push("--keep-open");
+  }
+  return args;
+}
+
 function optionArgs(body, mapping) {
   const args = [];
   for (const [flag, key] of Object.entries(mapping)) {

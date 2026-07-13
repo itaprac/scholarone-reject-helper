@@ -4,6 +4,7 @@ const state = {
   currentJob: null,
   pollTimer: null,
   configApplied: false,
+  activeView: "reject",
 };
 
 const REPORT_COLUMN_COUNT = 5;
@@ -22,6 +23,10 @@ const REPORT_STATUS_LABELS = {
 };
 
 const els = {
+  rejectTab: document.getElementById("rejectTab"),
+  reviewersTab: document.getElementById("reviewersTab"),
+  rejectPanel: document.getElementById("rejectPanel"),
+  reviewersPanel: document.getElementById("reviewersPanel"),
   statusLine: document.getElementById("statusLine"),
   refreshBtn: document.getElementById("refreshBtn"),
   startUrl: document.getElementById("startUrl"),
@@ -42,8 +47,34 @@ const els = {
   sendReportBtn: document.getElementById("sendReportBtn"),
   stopBtn: document.getElementById("stopBtn"),
   jobOutput: document.getElementById("jobOutput"),
+  reviewerQueue: document.getElementById("reviewerQueue"),
+  reviewerMaxManuscripts: document.getElementById("reviewerMaxManuscripts"),
+  reviewersPerPaper: document.getElementById("reviewersPerPaper"),
+  reviewerStartUrl: document.getElementById("reviewerStartUrl"),
+  reviewerSlowMo: document.getElementById("reviewerSlowMo"),
+  reviewerRefreshWaitSeconds: document.getElementById("reviewerRefreshWaitSeconds"),
+  reviewerKeepOpen: document.getElementById("reviewerKeepOpen"),
+  reviewerBatchSummary: document.getElementById("reviewerBatchSummary"),
+  prepareReviewersBtn: document.getElementById("prepareReviewersBtn"),
+  inviteReviewersBtn: document.getElementById("inviteReviewersBtn"),
+  saveReviewerSettingsBtn: document.getElementById("saveReviewerSettingsBtn"),
+  reviewerSettingsStatus: document.getElementById("reviewerSettingsStatus"),
 };
 
+els.rejectTab.addEventListener("click", () => activateView("reject"));
+els.reviewersTab.addEventListener("click", () => activateView("reviewers"));
+for (const tab of [els.rejectTab, els.reviewersTab]) {
+  tab.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const nextView = state.activeView === "reject" ? "reviewers" : "reject";
+    activateView(nextView);
+    (nextView === "reviewers" ? els.reviewersTab : els.rejectTab).focus();
+  });
+}
+els.reviewerMaxManuscripts.addEventListener("input", renderReviewerBatchSummary);
+els.reviewersPerPaper.addEventListener("input", renderReviewerBatchSummary);
+els.reviewerQueue.addEventListener("change", renderReviewerBatchSummary);
 bindAsyncClick(els.refreshBtn, refresh);
 bindAsyncClick(els.dryRunBtn, runDryRun);
 bindAsyncClick(els.liveRunBtn, runLiveSend);
@@ -51,6 +82,9 @@ bindAsyncClick(els.sendReportBtn, sendSelectedReport);
 bindAsyncClick(els.saveSettingsBtn, saveSettings);
 bindAsyncClick(els.resetSettingsBtn, resetSettings);
 bindAsyncClick(els.stopBtn, stopCurrentJob);
+bindAsyncClick(els.prepareReviewersBtn, runReviewerPreparation);
+bindAsyncClick(els.inviteReviewersBtn, runReviewerBatch);
+bindAsyncClick(els.saveReviewerSettingsBtn, saveReviewerSettings);
 
 refresh().catch(showError);
 
@@ -141,6 +175,30 @@ async function sendSelectedReport() {
   setJob(payload.job);
 }
 
+async function runReviewerPreparation() {
+  if (!validateInputs(reviewerInputs())) return;
+
+  const payload = await api("/api/run/reviewers/prepare", {
+    method: "POST",
+    body: JSON.stringify({
+      ...reviewerOptions(),
+      reviewerMaxManuscripts: "1",
+      reviewerKeepOpen: true,
+    }),
+  });
+  setJob(payload.job);
+}
+
+async function runReviewerBatch() {
+  if (!validateInputs(reviewerInputs())) return;
+
+  const payload = await api("/api/run/reviewers/invite", {
+    method: "POST",
+    body: JSON.stringify(reviewerOptions()),
+  });
+  setJob(payload.job);
+}
+
 async function saveSettings() {
   const payload = await api("/api/settings", {
     method: "POST",
@@ -158,6 +216,15 @@ async function resetSettings() {
   const payload = await api("/api/settings/reset", { method: "POST" });
   applyConfig(payload.config);
   els.settingsStatus.textContent = "Reset to defaults";
+}
+
+async function saveReviewerSettings() {
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settingsOptions()),
+  });
+  applyConfig(payload.config);
+  els.reviewerSettingsStatus.textContent = `Saved to ${payload.config.settingsPath}`;
 }
 
 async function stopCurrentJob() {
@@ -346,6 +413,19 @@ function updateActionState() {
   els.dryRunBtn.disabled = jobRunning;
   els.liveRunBtn.disabled = jobRunning;
   els.sendReportBtn.disabled = jobRunning || !state.selectedReportPath;
+  els.prepareReviewersBtn.disabled = jobRunning;
+  els.inviteReviewersBtn.disabled = jobRunning;
+}
+
+function activateView(view) {
+  state.activeView = view;
+  const reviewersActive = view === "reviewers";
+  els.rejectPanel.hidden = reviewersActive;
+  els.reviewersPanel.hidden = !reviewersActive;
+  els.rejectTab.classList.toggle("selected", !reviewersActive);
+  els.reviewersTab.classList.toggle("selected", reviewersActive);
+  els.rejectTab.setAttribute("aria-selected", String(!reviewersActive));
+  els.reviewersTab.setAttribute("aria-selected", String(reviewersActive));
 }
 
 function showError(error) {
@@ -388,9 +468,19 @@ function applyConfig(config) {
   setValue(els.maxRejected, config.maxRejected);
   setValue(els.rejectMessage, config.rejectMessage);
   els.keepOpen.checked = Boolean(config.keepOpen);
-  els.settingsStatus.textContent = config.settingsSaved
+  setValue(els.reviewerStartUrl, config.reviewerStartUrl);
+  setValue(els.reviewerQueue, config.reviewerQueue);
+  setValue(els.reviewersPerPaper, config.reviewersPerPaper);
+  setValue(els.reviewerMaxManuscripts, config.reviewerMaxManuscripts);
+  setValue(els.reviewerSlowMo, config.reviewerSlowMo);
+  setValue(els.reviewerRefreshWaitSeconds, config.reviewerRefreshWaitSeconds);
+  els.reviewerKeepOpen.checked = Boolean(config.reviewerKeepOpen);
+  renderReviewerBatchSummary();
+  const settingsStatus = config.settingsSaved
     ? `Saved: ${config.settingsPath}`
     : "Loaded from .env/defaults";
+  els.settingsStatus.textContent = settingsStatus;
+  els.reviewerSettingsStatus.textContent = settingsStatus;
 }
 
 function setValue(input, value) {
@@ -413,7 +503,43 @@ function sendOptions() {
 }
 
 function settingsOptions() {
-  return formOptions();
+  return {
+    ...formOptions(),
+    ...reviewerOptions(),
+  };
+}
+
+function reviewerInputs() {
+  return [
+    els.reviewerStartUrl,
+    els.reviewerMaxManuscripts,
+    els.reviewersPerPaper,
+    els.reviewerSlowMo,
+    els.reviewerRefreshWaitSeconds,
+  ];
+}
+
+function reviewerOptions() {
+  return {
+    reviewerStartUrl: valueOf(els.reviewerStartUrl),
+    reviewerQueue: els.reviewerQueue.value,
+    reviewerMaxManuscripts: valueOf(els.reviewerMaxManuscripts),
+    reviewersPerPaper: valueOf(els.reviewersPerPaper),
+    reviewerSlowMo: valueOf(els.reviewerSlowMo),
+    reviewerRefreshWaitSeconds: valueOf(els.reviewerRefreshWaitSeconds),
+    reviewerKeepOpen: els.reviewerKeepOpen.checked,
+  };
+}
+
+function renderReviewerBatchSummary() {
+  const papers = valueOf(els.reviewerMaxManuscripts) || "0";
+  const reviewers = valueOf(els.reviewersPerPaper) || "0";
+  const queue = {
+    combined: "Combined queue",
+    invite: "Invite Reviewers",
+    select: "Select Reviewers",
+  }[els.reviewerQueue.value] || "Combined queue";
+  els.reviewerBatchSummary.textContent = `Up to ${papers} papers, ${reviewers} reviewers each, from ${queue}`;
 }
 
 function formOptions() {

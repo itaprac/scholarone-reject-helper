@@ -5,7 +5,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { buildJobArgs } from "./job-args.js";
+import { buildJobArgs, buildReviewerJobArgs } from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,6 +13,7 @@ const projectRoot = path.resolve(__dirname, "..");
 const uiRoot = path.join(projectRoot, "ui");
 const reportsDir = path.join(projectRoot, "logs", "reports");
 const autoRejectScript = path.join(projectRoot, "src", "auto-reject.js");
+const scholarOneScript = path.join(projectRoot, "src", "scholarone.js");
 const settingsPath = path.join(projectRoot, "ui-settings.json");
 const preferredPort = Number.parseInt(process.env.UI_PORT || "3131", 10);
 const maxPort = preferredPort + 20;
@@ -71,6 +72,20 @@ const server = http.createServer(async (req, res) => {
         report: relativeProjectPath(reportPath),
       });
       return sendJson(res, { job: startJob("reject-from-report", args) });
+    }
+
+    if (url.pathname === "/api/run/reviewers/prepare" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "reviewers-prepare");
+      const args = buildReviewerJobArgs("reviewers-prepare", body);
+      return sendJson(res, { job: startJob("reviewers-prepare", args, scholarOneScript) });
+    }
+
+    if (url.pathname === "/api/run/reviewers/invite" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "reviewers-invite");
+      const args = buildReviewerJobArgs("reviewers-invite", body);
+      return sendJson(res, { job: startJob("reviewers-invite", args, scholarOneScript) });
     }
 
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
@@ -162,6 +177,15 @@ async function publicConfig() {
     maxRejected: saved.maxRejected ?? envValue("MAX_REJECTED", ""),
     keepOpen: saved.keepOpen ?? parseBool(envValue("KEEP_OPEN", ""), false),
     rejectMessage: saved.rejectMessage ?? loadRejectMessage(),
+    reviewerStartUrl: saved.reviewerStartUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
+    reviewerQueue: ["combined", "select", "invite"].includes(saved.reviewerQueue)
+      ? saved.reviewerQueue
+      : "combined",
+    reviewersPerPaper: saved.reviewersPerPaper ?? envValue("REVIEWERS_PER_PAPER", "10"),
+    reviewerMaxManuscripts: saved.reviewerMaxManuscripts ?? "3",
+    reviewerSlowMo: saved.reviewerSlowMo ?? envValue("SLOW_MO", "500"),
+    reviewerRefreshWaitSeconds: saved.reviewerRefreshWaitSeconds ?? envValue("REVIEWER_REFRESH_WAIT_SECONDS", "60"),
+    reviewerKeepOpen: saved.reviewerKeepOpen ?? false,
   };
 }
 
@@ -175,6 +199,15 @@ async function saveUiSettings(body) {
     maxRejected: normalizeOptionalIntegerSetting(body.maxRejected),
     keepOpen: Boolean(body.keepOpen),
     rejectMessage: String(body.rejectMessage || "").trimEnd(),
+    reviewerStartUrl: String(body.reviewerStartUrl || "").trim(),
+    reviewerQueue: ["combined", "select", "invite"].includes(body.reviewerQueue)
+      ? body.reviewerQueue
+      : "combined",
+    reviewersPerPaper: normalizeIntegerSetting(body.reviewersPerPaper, "10"),
+    reviewerMaxManuscripts: normalizeIntegerSetting(body.reviewerMaxManuscripts, "3"),
+    reviewerSlowMo: normalizeIntegerSetting(body.reviewerSlowMo, "500", 0),
+    reviewerRefreshWaitSeconds: normalizeIntegerSetting(body.reviewerRefreshWaitSeconds, "60"),
+    reviewerKeepOpen: Boolean(body.reviewerKeepOpen),
   };
 
   if (!settings.startUrl) {
@@ -182,6 +215,9 @@ async function saveUiSettings(body) {
   }
   if (!settings.rejectMessage) {
     settings.rejectMessage = loadRejectMessage();
+  }
+  if (!settings.reviewerStartUrl) {
+    settings.reviewerStartUrl = settings.startUrl;
   }
 
   await fsp.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
@@ -203,7 +239,7 @@ async function readJsonFile(filePath) {
   }
 }
 
-function startJob(type, args) {
+function startJob(type, args, script = autoRejectScript) {
   const running = activeJobId ? jobs.get(activeJobId) : null;
   if (running && ["running", "stopping"].includes(running.status)) {
     const error = new Error(`Job ${activeJobId} is still running.`);
@@ -212,7 +248,7 @@ function startJob(type, args) {
   }
 
   const id = String(nextJobId++);
-  const child = spawn(process.execPath, [autoRejectScript, ...args], {
+  const child = spawn(process.execPath, [script, ...args], {
     cwd: projectRoot,
     env: process.env,
   });

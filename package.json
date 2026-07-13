@@ -10,6 +10,10 @@
     "dryrun": "node src/auto-reject.js --headed --dry-run",
     "reject": "node src/auto-reject.js --headed --save-and-send",
     "reject:from-report": "node src/auto-reject.js --headed --save-and-send --require-targets",
+    "select-reviewers": "node src/scholarone.js --select-reviewers --headed",
+    "select-reviewers:invite": "node src/scholarone.js --select-reviewers --headed --invite-all",
+    "select-reviewers:resume": "node src/scholarone.js --select-reviewers --headed --resume-invite-reviewers",
+    "select-reviewers:resume:invite": "node src/scholarone.js --select-reviewers --headed --resume-invite-reviewers --invite-all",
     "codegen": "playwright codegen https://mc.manuscriptcentral.com/kes"
   },
   "dependencies": {
