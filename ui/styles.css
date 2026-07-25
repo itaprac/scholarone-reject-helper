@@ -482,7 +482,8 @@ tr.report-row.selected .report-name {
   text-align: center;
 }
 
-.report-action-bar {
+.report-action-bar,
+.run-action-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -494,7 +495,8 @@ tr.report-row.selected .report-name {
   background: var(--surface);
 }
 
-.report-action-bar > div {
+.report-action-bar > div,
+.run-action-bar > div {
   display: grid;
   gap: 2px;
 }
@@ -540,7 +542,8 @@ tr.report-row.selected .report-name {
 @media (max-width: 520px) {
   .topbar,
   .topbar-status,
-  .report-action-bar {
+  .report-action-bar,
+.run-action-bar {
     align-items: flex-start;
   }
 
@@ -561,11 +564,13 @@ tr.report-row.selected .report-name {
 
   .section-title,
   .report-action-bar,
+  .run-action-bar,
   .operation-strip {
     flex-direction: column;
   }
 
-  .report-action-bar button {
+  .report-action-bar button,
+  .run-action-bar button {
     width: 100%;
   }
 

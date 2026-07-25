@@ -60,6 +60,8 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
     loginPassword: credentials.password,
     queueStartPage: toInteger(args["queue-start-page"] || env.QUEUE_START_PAGE, DEFAULTS.queueStartPage),
     rejectFromReport: args["reject-from-report"] || env.REJECT_FROM_REPORT || "",
+    // Wykonanie decyzji z zapisanego przebiegu oceny, bez ponownego pytania modelu.
+    screeningFromRun: args["from-run"] || args["screening-from-run"] || "",
     rejectIds: parseIdList(args["reject-ids"] || env.REJECT_IDS || ""),
     rejectProgressFile: args["reject-progress-file"] || env.REJECT_PROGRESS_FILE || "",
     requireTargets: parseBool(args["require-targets"] ?? env.REQUIRE_TARGETS, false),

@@ -25,12 +25,12 @@ export const DEFAULTS = Object.freeze({
 
   // Wybór recenzentów.
   reviewersPerPaper: 10,
-  reviewerMaxManuscripts: 3,
+  reviewerMaxManuscripts: 10,
   reviewerRefreshWaitSeconds: 60,
   reviewerQueue: "combined",
 
   // Wstępna ocena LLM.
-  screeningMaxChecked: 10,
+  screeningMaxChecked: 100,
   assessmentModel: DEFAULT_ASSESSMENT_MODEL,
   assessmentReasoningEffort: DEFAULT_ASSESSMENT_REASONING_EFFORT,
   assessmentTimeoutSeconds: 120,
@@ -41,7 +41,7 @@ export const DEFAULTS = Object.freeze({
   // Domyślny bezpiecznik trybów live. Świadomie ustawiony, a nie nieskończony:
   // --scan-all-metadata puszcza całą kolejkę, więc jedno przeoczenie w prompcie
   // mogłoby skończyć się dziesiątkami wysłanych wiadomości.
-  maxLiveActions: 25,
+  maxLiveActions: 100,
 
   // Katalogi.
   profileDir: path.join(projectRoot, "playwright-profile"),
@@ -55,7 +55,7 @@ export const DEFAULTS = Object.freeze({
 // i większy zakres kolejki są tam wygodniejsze, a użytkownik i tak je widzi.
 export const UI_DEFAULTS = Object.freeze({
   ...DEFAULTS,
-  maxChecked: 50,
+  maxChecked: 200,
   slowMo: 500,
 });
 

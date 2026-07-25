@@ -127,6 +127,17 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { job: startJob("initial-assessment-live", args) });
     }
 
+    if (url.pathname === "/api/run/screening/execute" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const runPath = resolveScreeningRunPath(body.run);
+      return sendJson(res, {
+        job: startJob("initial-assessment-from-run", [
+          "--headed",
+          `--from-run=${relativeProjectPath(runPath)}`,
+        ]),
+      });
+    }
+
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
     if (jobMatch && req.method === "GET") {
       const job = jobs.get(jobMatch[1]);
@@ -473,6 +484,30 @@ function resolveReportPath(value) {
     throw new Error("Raport musi byc plikiem JSON/CSV z logs/reports.");
   }
   return absolutePath;
+}
+
+// Ścieżka musi wskazywać plik wyniku w logs/screening — bez tego panel mógłby
+// kazać wykonać dowolny plik z dysku.
+function resolveScreeningRunPath(value) {
+  if (!value) throw badRequest("Wybierz zapisany przebieg oceny.");
+
+  const screeningDir = path.join(projectRoot, "logs", "screening");
+  const absolutePath = path.resolve(screeningDir, path.basename(String(value)));
+  const relative = path.relative(screeningDir, absolutePath);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative) || !/\.json$/i.test(absolutePath)) {
+    throw badRequest("Przebieg musi byc plikiem JSON z logs/screening.");
+  }
+  if (!fs.existsSync(absolutePath)) {
+    throw badRequest("Nie znaleziono wskazanego przebiegu oceny.");
+  }
+  return absolutePath;
+}
+
+function badRequest(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
 }
 
 function relativeProjectPath(filePath) {

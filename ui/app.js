@@ -84,6 +84,8 @@ const els = {
   screeningRunSummary: document.getElementById("screeningRunSummary"),
   screeningResultsBody: document.getElementById("screeningResultsBody"),
   refreshScreeningRunsBtn: document.getElementById("refreshScreeningRunsBtn"),
+  screeningRunSelection: document.getElementById("screeningRunSelection"),
+  executeRunBtn: document.getElementById("executeRunBtn"),
 };
 
 els.rejectTab.addEventListener("click", () => activateView("reject"));
@@ -125,6 +127,7 @@ bindAsyncClick(els.saveScreeningSettingsBtn, saveScreeningSettings);
 els.screeningRunSelect?.addEventListener("change", () => loadScreeningRun().catch(showError));
 els.screeningDecisionFilter?.addEventListener("change", renderScreeningResults);
 if (els.refreshScreeningRunsBtn) bindAsyncClick(els.refreshScreeningRunsBtn, refreshScreeningRuns);
+if (els.executeRunBtn) bindAsyncClick(els.executeRunBtn, executeSelectedRun);
 
 refresh().catch(showError);
 refreshDoctor().catch(() => undefined);
@@ -163,6 +166,41 @@ async function refresh() {
 
 // Joby przeżywają restart panelu (logs/jobs/), więc "co i kiedy odpalałem"
 // jest dostępne bez grzebania w logach.
+// Ta sama ścieżka bezpieczeństwa co reject z raportu: obejrzyj wynik, potem
+// wykonaj. Model nie jest pytany ponownie — wykonywane są dokładnie te decyzje,
+// które widać w tabeli.
+async function executeSelectedRun() {
+  const run = state.screeningRun;
+  const filename = els.screeningRunSelect?.value;
+  if (!run || !filename) {
+    showError(new Error("Select a saved run first."));
+    return;
+  }
+
+  const pending = run.manuscripts.filter(
+    (row) => row.decision && !row.assessmentError && !row.actionCompleted
+  );
+  if (pending.length === 0) {
+    showError(new Error("This run has no decisions left to execute."));
+    return;
+  }
+
+  const approve = pending.filter((row) => row.decision === "APPROVE").length;
+  const reject = pending.filter((row) => row.decision === "REJECT").length;
+
+  if (!confirmDangerousAction(
+    `Execute ${pending.length} decisions from this run?\n\nAPPROVE: ${approve}\nREJECT: ${reject}\n\nRejection emails will be sent and approved papers will be assigned to the configured editor.`
+  )) {
+    return;
+  }
+
+  const payload = await api("/api/run/screening/execute", {
+    method: "POST",
+    body: JSON.stringify({ run: filename }),
+  });
+  setJob(payload.job);
+}
+
 async function refreshJobHistory() {
   if (!els.jobHistory) return;
 
@@ -171,7 +209,7 @@ async function refreshJobHistory() {
 
   if (jobs.length === 0) {
     const empty = document.createElement("li");
-    empty.textContent = "Brak zapisanych uruchomień.";
+    empty.textContent = "No saved runs yet.";
     els.jobHistory.append(empty);
     return;
   }
@@ -200,9 +238,9 @@ async function refreshJobHistory() {
 function describeJobOutcome(job) {
   const progress = job.progress || {};
   const parts = [job.status];
-  if (progress.sent) parts.push(`wysłane ${progress.sent}`);
-  if (progress.checked) parts.push(`sprawdzone ${progress.checked}`);
-  if (progress.errors) parts.push(`błędy ${progress.errors}`);
+  if (progress.sent) parts.push(`sent ${progress.sent}`);
+  if (progress.checked) parts.push(`checked ${progress.checked}`);
+  if (progress.errors) parts.push(`errors ${progress.errors}`);
   return parts.join(" · ");
 }
 
@@ -214,7 +252,7 @@ async function refreshScreeningRuns() {
   els.screeningRunSelect.replaceChildren();
 
   if (runs.length === 0) {
-    els.screeningRunSummary.textContent = "Brak zapisanych przebiegów";
+    els.screeningRunSummary.textContent = "No saved runs";
     els.screeningResultsBody.replaceChildren();
     return;
   }
@@ -223,7 +261,7 @@ async function refreshScreeningRuns() {
     const option = document.createElement("option");
     option.value = run.filename;
     const when = run.createdAt ? formatReportDate(run.createdAt) : run.runId;
-    option.textContent = `${when} · ${run.manuscriptCount} art. ${run.live ? "· live" : ""}`.trim();
+    option.textContent = `${when} · ${run.manuscriptCount} papers${run.live ? " · live" : ""}`;
     els.screeningRunSelect.append(option);
   }
 
@@ -251,12 +289,26 @@ function renderScreeningResults() {
   });
 
   const summary = run.summary || {};
+  const pending = run.manuscripts.filter(
+    (row) => row.decision && !row.assessmentError && !row.actionCompleted
+  ).length;
+
+  if (els.screeningRunSelection) {
+    els.screeningRunSelection.textContent = pending
+      ? `${pending} decisions ready to execute`
+      : "Nothing left to execute in this run";
+  }
+  if (els.executeRunBtn) {
+    els.executeRunBtn.disabled = pending === 0 ||
+      Boolean(state.currentJob && ["running", "stopping"].includes(state.currentJob.status));
+  }
+
   els.screeningRunSummary.textContent = [
-    `${run.manuscripts.length} artykułów`,
+    `${run.manuscripts.length} papers`,
     summary.approved !== undefined ? `APPROVE ${summary.approved}` : null,
     summary.rejected !== undefined ? `REJECT ${summary.rejected}` : null,
-    summary.assessmentErrors ? `błędy ${summary.assessmentErrors}` : null,
-    run.live ? "tryb live" : "dry run",
+    summary.assessmentErrors ? `errors ${summary.assessmentErrors}` : null,
+    run.live ? "live" : "dry run",
   ].filter(Boolean).join(" · ");
 
   els.screeningResultsBody.replaceChildren();
@@ -265,7 +317,7 @@ function renderScreeningResults() {
     const empty = document.createElement("tr");
     const cell = document.createElement("td");
     cell.colSpan = 5;
-    cell.textContent = "Brak wyników dla wybranego filtra.";
+    cell.textContent = "No results for this filter.";
     empty.append(cell);
     els.screeningResultsBody.append(empty);
     return;
@@ -288,17 +340,17 @@ function screeningRow(row) {
   // Abstrakt bywa długi; pokazujemy go dopiero na żądanie.
   const details = document.createElement("details");
   const label = document.createElement("summary");
-  label.textContent = "abstrakt";
+  label.textContent = "abstract";
   const abstract = document.createElement("p");
   abstract.className = "row-abstract";
-  abstract.textContent = row.abstract || "(brak)";
+  abstract.textContent = row.abstract || "(none)";
   details.append(label, abstract);
   idCell.append(id, title, details);
 
   const decisionCell = document.createElement("td");
-  decisionCell.textContent = row.decision || (row.assessmentError ? "BŁĄD" : "—");
+  decisionCell.textContent = row.decision || (row.assessmentError ? "ERROR" : "—");
   decisionCell.dataset.decision = row.decision || (row.assessmentError ? "ERROR" : "");
-  if (row.cached) decisionCell.title = "wynik z cache";
+  if (row.cached) decisionCell.title = "result from cache";
 
   const reasonCell = document.createElement("td");
   reasonCell.textContent = row.assessmentError || row.reason || "—";
@@ -309,9 +361,9 @@ function screeningRow(row) {
 
   const actionCell = document.createElement("td");
   actionCell.textContent = row.actionError
-    ? `błąd: ${row.actionError}`
+    ? `failed: ${row.actionError}`
     : row.actionCompleted
-      ? `wykonano ${row.actionDecision}`
+      ? `done: ${row.actionDecision}`
       : "—";
 
   tr.append(idCell, decisionCell, reasonCell, tokensCell, actionCell);
@@ -378,13 +430,13 @@ async function runLiveSend() {
 
 async function sendSelectedReport() {
   if (!state.selectedReportPath) {
-    showError(new Error("Wybierz raport z tabeli."));
+    showError(new Error("Select a report from the table."));
     return;
   }
   if (!validateInputs([els.startUrl, els.olderDays, els.slowMo, els.maxRejected])) {
     return;
   }
-  if (!confirmDangerousAction(`Odrzucic kandydatow z raportu?\n\n${state.selectedReportPath}`)) {
+  if (!confirmDangerousAction(`Reject the candidates from this report?\n\n${state.selectedReportPath}`)) {
     return;
   }
 
@@ -423,10 +475,10 @@ async function runLiveAssessment() {
   if (!validateInputs(screeningInputs())) return;
 
   const scope = els.screeningScope.value === "all"
-    ? "całą kolejkę Complete Checklist"
-    : `maksymalnie ${valueOf(els.screeningMaxChecked)} manuskryptów`;
+    ? "the entire Complete Checklist queue"
+    : `at most ${valueOf(els.screeningMaxChecked)} manuscripts`;
   if (!confirmDangerousAction(
-    `Uruchomić LIVE dla ${scope}?\n\nAPPROVE i REJECT zostaną naprawdę wykonane w ScholarOne. Wiadomości Reject zostaną wysłane, a zatwierdzone prace zostaną przypisane do Wojciecha Sałabuna jako EIC i AE.`
+    `Run LIVE over ${scope}?\n\nAPPROVE and REJECT will really be performed in ScholarOne. Rejection emails will be sent and approved papers will be assigned to the configured editor as EIC and AE.`
   )) {
     return;
   }
@@ -591,19 +643,19 @@ function renderProgress(progress) {
   if (!els.jobProgress || !progress) return;
 
   const parts = [];
-  if (progress.checked) parts.push(`sprawdzone: ${progress.checked}`);
+  if (progress.checked) parts.push(`checked: ${progress.checked}`);
   if (progress.currentManuscriptId) parts.push(progress.currentManuscriptId);
 
   const approve = progress.decisions?.APPROVE || 0;
   const reject = progress.decisions?.REJECT || 0;
   if (approve || reject) parts.push(`APPROVE ${approve} / REJECT ${reject}`);
-  if (progress.sent) parts.push(`wysłane: ${progress.sent}`);
+  if (progress.sent) parts.push(`sent: ${progress.sent}`);
   if (progress.liveActions) {
-    parts.push(`akcje live: ${progress.liveActions}${progress.liveActionLimit ? `/${progress.liveActionLimit}` : ""}`);
+    parts.push(`live actions: ${progress.liveActions}${progress.liveActionLimit ? `/${progress.liveActionLimit}` : ""}`);
   }
   if (progress.cacheHits) parts.push(`cache: ${progress.cacheHits}`);
-  if (progress.skipped) parts.push(`pominięte: ${progress.skipped}`);
-  if (progress.errors) parts.push(`błędy: ${progress.errors}`);
+  if (progress.skipped) parts.push(`skipped: ${progress.skipped}`);
+  if (progress.errors) parts.push(`errors: ${progress.errors}`);
   if (progress.tokenSummary) parts.push(progress.tokenSummary);
 
   els.jobProgress.textContent = parts.join(" · ") || "—";
@@ -762,6 +814,13 @@ function updateActionState() {
   els.inviteReviewersBtn.disabled = jobRunning;
   els.screeningDryRunBtn.disabled = jobRunning;
   els.screeningLiveRunBtn.disabled = jobRunning;
+  if (els.executeRunBtn) {
+    const run = state.screeningRun;
+    const pending = run
+      ? run.manuscripts.filter((row) => row.decision && !row.assessmentError && !row.actionCompleted).length
+      : 0;
+    els.executeRunBtn.disabled = jobRunning || pending === 0;
+  }
 }
 
 function activateView(view) {
@@ -965,5 +1024,5 @@ function formOptions() {
 }
 
 function confirmDangerousAction(message) {
-  return window.confirm(`${message}\n\nTej akcji nie da sie cofnac w ScholarOne.`);
+  return window.confirm(`${message}\n\nThis cannot be undone in ScholarOne.`);
 }

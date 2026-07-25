@@ -26,7 +26,30 @@ kolejnych artykułów, a oceny domykają się równolegle (domyślnie 3 naraz,
 `--assessment-concurrency=N`). Czas przebiegu spada do wolniejszego z etapów
 zamiast ich sumy.
 
-## Wykonanie decyzji
+## Obejrzyj, potem wykonaj
+
+Bezpieczniejsza ścieżka, ta sama co przy odrzucaniu z raportu:
+
+1. odpal `screen --dry-run`,
+2. obejrzyj decyzje w panelu, w karcie `Initial assessment`,
+3. kliknij **Execute these decisions** albo z terminala:
+
+```bash
+node bin/scholarone.js screen --from-run=logs/screening/RUN_ID.json
+```
+
+Ten tryb **nie pyta modelu ponownie**. Bierze decyzje z pliku, wyszukuje każdy
+manuskrypt po ID i wykonuje dokładnie to, co zatwierdziłeś. Pomijane są:
+
+- artykuły, którym ten przebieg już wykonał akcję (inaczej poszedłby drugi mail),
+- artykuły z nieudaną oceną,
+- artykuły, których nie ma już w kolejce — najczęściej dlatego, że ktoś obsłużył
+  je ręcznie.
+
+W panelu przycisk jest nieaktywny, gdy w wybranym przebiegu nie ma nic do
+zrobienia, więc nie da się wykonać tego samego dwa razy.
+
+## Ocena i wykonanie w jednym przebiegu
 
 ```bash
 node bin/scholarone.js screen --live --max-checked=10

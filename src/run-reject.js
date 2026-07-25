@@ -20,6 +20,7 @@ import { setRunContext } from "./workflows/context.js";
 import { runMetadataCollection } from "./workflows/screening.js";
 import { runScan } from "./workflows/reject-scan.js";
 import { runRejectTargetsFromSearch } from "./workflows/reject-from-report.js";
+import { runScreeningFromRun } from "./workflows/screening-from-run.js";
 
 // Uruchomienie przebiegu odrzucania albo screeningu. Cała konfiguracja i
 // wszystkie zależności są tworzone tutaj i wstrzykiwane dalej — importowanie
@@ -91,7 +92,9 @@ export async function runReject(rawArgs = process.argv.slice(2)) {
 
     const result = await selectWorkflow(config)(page);
 
-    if (config.collectMetadata) {
+    if (config.screeningFromRun) {
+      console.log(`[FROM RUN] wykonane: ${result.performed || 0}/${result.checked || 0}`);
+    } else if (config.collectMetadata) {
       result.artifact = await writeMetadataArtifact(result, { config, runId });
       console.log(`[TOKEN SUMMARY] ${formatTokenUsage(result.summary?.tokenUsage)}`);
       console.log(`[SCREENING CSV] ${result.summaryCsv}`);
@@ -124,6 +127,8 @@ export async function runReject(rawArgs = process.argv.slice(2)) {
 }
 
 function selectWorkflow(config) {
+  // Wykonanie zapisanych decyzji nie zbiera metadanych i nie woła modelu.
+  if (config.screeningFromRun) return runScreeningFromRun;
   if (config.collectMetadata) return runMetadataCollection;
   if (config.rejectFromReport || config.rejectIds.length) return runRejectTargetsFromSearch;
   return runScan;

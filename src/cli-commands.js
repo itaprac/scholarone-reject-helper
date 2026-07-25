@@ -26,6 +26,13 @@ export function translateRejectArgs(rest) {
 }
 
 export function translateScreenArgs(rest) {
+  // Wykonanie decyzji z zapisanego przebiegu jest osobną ścieżką: nie zbiera
+  // metadanych i nie pyta modelu ponownie.
+  const fromRun = valueOf(rest, "from-run");
+  if (fromRun) {
+    return ["--headed", `--from-run=${fromRun}`, ...passThrough(rest, ["dry-run", "live", "from-run"])];
+  }
+
   const args = ["--headed", "--collect-metadata", "--assess-with-llm"];
 
   if (rest.includes("--live")) {

@@ -118,7 +118,7 @@
             <span>Reject email body</span>
             <span id="settingsStatus" class="fold-status" role="status" aria-live="polite">Not saved</span>
           </summary>
-          <p class="section-copy">Ten tekst trafia do wiadomości w przebiegach live i z raportu.</p>
+          <p class="section-copy">This text is used for live and report-based rejection runs.</p>
           <label class="message-label">
             <span class="sr-only">Reject email body</span>
             <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
@@ -180,7 +180,7 @@
             <label class="assessment-prompt-label">
               <span class="sr-only">Assessment rules</span>
               <textarea id="assessmentPrompt" rows="16" required spellcheck="true"></textarea>
-              <span>Helper dokleja tytuł, abstrakt i ścisły kontrakt JSON. Zapisz przez „Save assessment settings”.</span>
+              <span>The helper appends the manuscript title, abstract, and a strict JSON output contract. Save with “Save assessment settings”.</span>
             </label>
           </details>
 
@@ -224,7 +224,7 @@
           <div class="section-title">
             <div>
               <h2>Assessment results</h2>
-              <p>Decyzje z zapisanych przebiegów — bez otwierania plików w <code>logs/screening/</code>.</p>
+              <p class="section-copy">Review decisions from a saved run, then execute them. No need to open files in <code>logs/screening/</code>.</p>
             </div>
             <button id="refreshScreeningRunsBtn" type="button">Refresh</button>
           </div>
@@ -243,6 +243,15 @@
             </label>
             <strong id="screeningRunSummary" aria-live="polite">No run selected</strong>
           </div>
+
+          <div class="run-action-bar">
+            <div>
+              <span class="selection-label">Selected run</span>
+              <strong id="screeningRunSelection" aria-live="polite">No run selected</strong>
+            </div>
+            <button id="executeRunBtn" type="button" class="danger" disabled>Execute these decisions</button>
+          </div>
+          <p class="action-help">Applies the decisions above without asking the model again. Manuscripts already handled are skipped.</p>
 
           <div class="table-wrap">
             <table class="results-table">
@@ -323,7 +332,7 @@
           <div class="actions run-actions">
             <button id="inviteReviewersBtn" type="button" class="danger">Select + invite</button>
           </div>
-          <p class="action-help">Dobiera recenzentów i wysyła zaproszenia. Każdy artykuł jest potwierdzany statusami przed przejściem do następnego. Wysyłki nie da się cofnąć.</p>
+          <p class="action-help">Selects reviewers and sends invitations. Every paper is verified by reviewer status before the next one starts. Sending cannot be undone.</p>
 
           <div class="actions reviewer-settings-actions">
             <button id="saveReviewerSettingsBtn" type="button">Save reviewer settings</button>
@@ -343,7 +352,7 @@
         <p id="jobProgress" class="job-progress" role="status" aria-live="polite" hidden>—</p>
         <pre id="jobOutput">No active job.</pre>
         <details class="folded-settings run-history">
-          <summary><span>Ostatnie uruchomienia</span></summary>
+          <summary><span>Recent runs</span></summary>
           <ul id="jobHistory" class="job-history"></ul>
         </details>
       </section>

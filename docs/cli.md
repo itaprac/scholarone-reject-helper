@@ -21,7 +21,7 @@ wymaga jawnego `--send`, `--live` albo `--invite`.
 | Flaga | Typ | Domyślnie | Opis |
 |---|---|---|---|
 | `--start-url` | url | https://mc.manuscriptcentral.com/kes | Adres startowy ScholarOne. |
-| `--max-checked` | int ≥ 1 | 50 | Ile manuskryptów sprawdzić w tym przebiegu. |
+| `--max-checked` | int ≥ 1 | 200 | Ile manuskryptów sprawdzić w tym przebiegu. |
 | `--submitted-older-than-days` | int ≥ 1 | 30 | Próg wieku zgłoszenia. |
 | `--queue-start-page` | int ≥ 1 | — | Start od danej strony listy, np. 2 to pozycje 11-20. |
 | `--slow-mo` | int ≥ 0 | 500 | Spowolnienie kliknięć Playwrighta. |
@@ -32,7 +32,7 @@ wymaga jawnego `--send`, `--live` albo `--invite`.
 | Flaga | Typ | Domyślnie | Opis |
 |---|---|---|---|
 | `--start-url` | url | https://mc.manuscriptcentral.com/kes | Adres startowy ScholarOne. |
-| `--max-checked` | int ≥ 1 | 50 | Ile manuskryptów sprawdzić w tym przebiegu. |
+| `--max-checked` | int ≥ 1 | 200 | Ile manuskryptów sprawdzić w tym przebiegu. |
 | `--submitted-older-than-days` | int ≥ 1 | 30 | Próg wieku zgłoszenia. |
 | `--queue-start-page` | int ≥ 1 | — | Start od danej strony listy, np. 2 to pozycje 11-20. |
 | `--max-rejected` | int ≥ 1 | — | Bezpiecznik: maksymalna liczba odrzuceń w przebiegu. |
@@ -57,7 +57,7 @@ wymaga jawnego `--send`, `--live` albo `--invite`.
 |---|---|---|---|
 | `--start-url` | url | https://mc.manuscriptcentral.com/kes | Start URL |
 | `--reviewers-per-paper` | int ≥ 1 | 10 | Reviewers per paper |
-| `--max-manuscripts` | int ≥ 1 | 3 | Max manuscripts |
+| `--max-manuscripts` | int ≥ 1 | 10 | Max manuscripts |
 | `--slow-mo` | int ≥ 0 | 500 | Slow motion (ms) |
 | `--refresh-wait-seconds` | int ≥ 1 | 60 | Przerwa przed powrotem do artykułu odłożonego po Refresh Search. |
 | `--keep-open` | bool | false | Keep browser open |
@@ -68,7 +68,7 @@ wymaga jawnego `--send`, `--live` albo `--invite`.
 |---|---|---|---|
 | `--start-url` | url | https://mc.manuscriptcentral.com/kes | Start URL |
 | `--reviewers-per-paper` | int ≥ 1 | 10 | Reviewers per paper |
-| `--max-manuscripts` | int ≥ 1 | 3 | Max manuscripts |
+| `--max-manuscripts` | int ≥ 1 | 10 | Max manuscripts |
 | `--slow-mo` | int ≥ 0 | 500 | Slow motion (ms) |
 | `--refresh-wait-seconds` | int ≥ 1 | 60 | Przerwa przed powrotem do artykułu odłożonego po Refresh Search. |
 | `--keep-open` | bool | false | Keep browser open |
@@ -78,7 +78,7 @@ wymaga jawnego `--send`, `--live` albo `--invite`.
 | Flaga | Typ | Domyślnie | Opis |
 |---|---|---|---|
 | `--start-url` | url | https://mc.manuscriptcentral.com/kes | Start URL |
-| `--max-checked` | int ≥ 1 | 10 | Max checked |
+| `--max-checked` | int ≥ 1 | 100 | Max checked |
 | `--slow-mo` | int ≥ 0 | 500 | Slow motion (ms) |
 | `--assessment-model` | text | gpt-5.6-terra | Model |
 | `--assessment-reasoning-effort` | low \| medium \| high | medium | Reasoning effort |
