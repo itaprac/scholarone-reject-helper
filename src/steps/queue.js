@@ -10,6 +10,8 @@ import { inspectManuscriptText, normalizeManuscriptId } from "../manuscript-rule
 import { submitScholarOneLinkByImageAlt } from "./reject-email.js";
 
 // Kontekst przebiegu ustawiany raz przy starcie.
+export const QUEUE_CONTEXT_KEYS = Object.freeze(["config", "log", "ensureLoggedIn", "screenshots"]);
+
 let ctx = {
   config: {},
   log: async () => undefined,
@@ -18,6 +20,14 @@ let ctx = {
 };
 
 export function setQueueContext(next) {
+  // Nieznany klucz to zwykle literówka po stronie wywołującego. Bez tego
+  // sprawdzenia wchodziłby po cichu do obiektu i ujawniał się dopiero jako
+  // undefined w środku przebiegu.
+  for (const key of Object.keys(next || {})) {
+    if (!QUEUE_CONTEXT_KEYS.includes(key)) {
+      throw new Error(`setQueueContext: nieznany klucz kontekstu "${key}".`);
+    }
+  }
   ctx = { ...ctx, ...next };
 }
 
@@ -411,7 +421,7 @@ export async function goToQueueListPage(page, targetPageValue, retryAfterLogin =
   await waitForNavigationOrTimeout(page, 12000);
 
   if (await isLoginPage(page)) {
-    await ctx.ctx.ensureLoggedIn(page, { reason: "queue-page-advance" });
+    await ctx.ensureLoggedIn(page, { reason: "queue-page-advance" });
     await ensureManuscriptListReady(page);
 
     const afterLogin = await readQueuePageInfo(page);
@@ -559,7 +569,7 @@ export async function waitForDetailsPageOrRelogin(page, reason) {
         message: error.message,
         url: page.url(),
       });
-      await ctx.ctx.ensureLoggedIn(page, { reason });
+      await ctx.ensureLoggedIn(page, { reason });
       return false;
     }
 
@@ -576,7 +586,7 @@ export async function inspectCurrentManuscript(page) {
 
 export async function returnToList(page) {
   if (await isLoginPage(page)) {
-    await ctx.ctx.ensureLoggedIn(page, { reason: "return-to-list" });
+    await ctx.ensureLoggedIn(page, { reason: "return-to-list" });
     await page.goto(ctx.config.startUrl, { waitUntil: "domcontentloaded" });
     await ensureManuscriptListReady(page);
     return;
@@ -585,7 +595,7 @@ export async function returnToList(page) {
   const before = page.url();
   await page.goBack({ waitUntil: "domcontentloaded" }).catch(() => undefined);
   if (await isLoginPage(page)) {
-    await ctx.ctx.ensureLoggedIn(page, { reason: "return-to-list-after-back" });
+    await ctx.ensureLoggedIn(page, { reason: "return-to-list-after-back" });
     await page.goto(ctx.config.startUrl, { waitUntil: "domcontentloaded" });
     await ensureManuscriptListReady(page);
     return;
@@ -611,13 +621,13 @@ export async function returnToList(page) {
   }
 
   await page.goto(ctx.config.startUrl, { waitUntil: "domcontentloaded" });
-  await ctx.ctx.ensureLoggedIn(page, { reason: "return-to-list-start-url" });
+  await ctx.ensureLoggedIn(page, { reason: "return-to-list-start-url" });
   await ensureManuscriptListReady(page);
 }
 
 export async function goToNextDocument(page) {
   if (await isLoginPage(page)) {
-    await ctx.ctx.ensureLoggedIn(page, { reason: "before-next-document" });
+    await ctx.ensureLoggedIn(page, { reason: "before-next-document" });
     return false;
   }
 
@@ -647,7 +657,7 @@ export async function ensureManuscriptListReady(page) {
   }
 
   if (await isLoginPage(page)) {
-    await ctx.ctx.ensureLoggedIn(page, { reason: "queue" });
+    await ctx.ensureLoggedIn(page, { reason: "queue" });
     if ((await countViewDetailsControls(page)) > 0) {
       return;
     }
