@@ -5,16 +5,11 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { DEFAULT_ASSESSMENT_PROMPT } from "./default-assessment-prompt.js";
-import { DEFAULT_SCREENING_REJECT_MESSAGE } from "./default-screening-reject-message.js";
-import {
-  DEFAULT_ASSESSMENT_MODEL,
-  DEFAULT_ASSESSMENT_REASONING_EFFORT,
-  normalizeAssessmentReasoningEffort,
-} from "./assessment-config.js";
 import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
-import { REVIEWER_QUEUES, UI_DEFAULTS } from "./config/defaults.js";
+import { buildPublicConfig, normalizeUiSettings } from "./config/ui-settings.js";
+import { describeFields } from "./config/options.js";
+import { runDoctorChecks } from "./doctor.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -45,6 +40,20 @@ const server = http.createServer(async (req, res) => {
         reports: await listReports(),
         activeJob: activeJobId ? publicJob(jobs.get(activeJobId)) : null,
       });
+    }
+
+    // Opis pól formularza pochodzi z tej samej definicji co walidacja i
+    // argumenty CLI, więc panel nie może pokazać opcji, której backend nie zna.
+    if (url.pathname === "/api/fields" && req.method === "GET") {
+      return sendJson(res, {
+        reject: describeFields("live"),
+        screening: describeFields("screening"),
+        reviewers: describeFields("reviewers-invite"),
+      });
+    }
+
+    if (url.pathname === "/api/doctor" && req.method === "GET") {
+      return sendJson(res, { checks: await runDoctorChecks() });
     }
 
     if (url.pathname === "/api/settings" && req.method === "POST") {
@@ -192,96 +201,12 @@ async function publicConfig() {
   return {
     settingsPath: relativeProjectPath(settingsPath),
     settingsSaved: fs.existsSync(settingsPath),
-    startUrl: saved.startUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
-    maxChecked: saved.maxChecked ?? envValue("MAX_CHECKED", String(UI_DEFAULTS.maxChecked)),
-    submittedOlderThanDays: saved.submittedOlderThanDays ?? envValue("SUBMITTED_OLDER_THAN_DAYS", String(UI_DEFAULTS.submittedOlderThanDays)),
-    queueStartPage: saved.queueStartPage ?? envValue("QUEUE_START_PAGE", ""),
-    slowMo: saved.slowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
-    maxRejected: saved.maxRejected ?? envValue("MAX_REJECTED", ""),
-    keepOpen: saved.keepOpen ?? parseBool(envValue("KEEP_OPEN", ""), false),
-    rejectMessage: saved.rejectMessage ?? loadRejectMessage(),
-    reviewerStartUrl: saved.reviewerStartUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
-    reviewerQueue: REVIEWER_QUEUES.includes(saved.reviewerQueue)
-      ? saved.reviewerQueue
-      : UI_DEFAULTS.reviewerQueue,
-    reviewersPerPaper: saved.reviewersPerPaper ?? envValue("REVIEWERS_PER_PAPER", String(UI_DEFAULTS.reviewersPerPaper)),
-    reviewerMaxManuscripts: saved.reviewerMaxManuscripts ?? String(UI_DEFAULTS.reviewerMaxManuscripts),
-    reviewerSlowMo: saved.reviewerSlowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
-    reviewerRefreshWaitSeconds: saved.reviewerRefreshWaitSeconds ?? envValue("REVIEWER_REFRESH_WAIT_SECONDS", String(UI_DEFAULTS.reviewerRefreshWaitSeconds)),
-    reviewerKeepOpen: saved.reviewerKeepOpen ?? false,
-    screeningStartUrl: saved.screeningStartUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
-    screeningMaxChecked: saved.screeningMaxChecked ?? String(UI_DEFAULTS.screeningMaxChecked),
-    screeningScanAll: saved.screeningScanAll ?? true,
-    screeningSlowMo: saved.screeningSlowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
-    screeningKeepOpen: false,
-    assessmentModel: String(
-      saved.assessmentModel ||
-      envValue("ASSESSMENT_MODEL", DEFAULT_ASSESSMENT_MODEL) ||
-      DEFAULT_ASSESSMENT_MODEL
-    ).trim(),
-    assessmentReasoningEffort: normalizeAssessmentReasoningEffort(
-      saved.assessmentReasoningEffort ??
-      envValue("ASSESSMENT_REASONING_EFFORT", DEFAULT_ASSESSMENT_REASONING_EFFORT)
-    ),
-    assessmentTimeoutSeconds: saved.assessmentTimeoutSeconds ?? envValue("ASSESSMENT_TIMEOUT_SECONDS", String(UI_DEFAULTS.assessmentTimeoutSeconds)),
-    assessmentPrompt: saved.assessmentPrompt ?? envValue("ASSESSMENT_PROMPT", DEFAULT_ASSESSMENT_PROMPT).replace(/\\n/g, "\n"),
-    screeningRejectMessage: saved.screeningRejectMessage ??
-      envValue("SCREENING_REJECT_MESSAGE", DEFAULT_SCREENING_REJECT_MESSAGE).replace(/\\n/g, "\n"),
+    ...buildPublicConfig({ saved, envValue, rejectMessage: loadRejectMessage }),
   };
 }
 
 async function saveUiSettings(body) {
-  const settings = {
-    startUrl: String(body.startUrl || "").trim(),
-    maxChecked: normalizeIntegerSetting(body.maxChecked, "50"),
-    submittedOlderThanDays: normalizeIntegerSetting(body.submittedOlderThanDays, "30"),
-    queueStartPage: normalizeOptionalIntegerSetting(body.queueStartPage),
-    slowMo: normalizeIntegerSetting(body.slowMo, "500", 0),
-    maxRejected: normalizeOptionalIntegerSetting(body.maxRejected),
-    keepOpen: Boolean(body.keepOpen),
-    rejectMessage: String(body.rejectMessage || "").trimEnd(),
-    reviewerStartUrl: String(body.reviewerStartUrl || "").trim(),
-    reviewerQueue: REVIEWER_QUEUES.includes(body.reviewerQueue)
-      ? body.reviewerQueue
-      : UI_DEFAULTS.reviewerQueue,
-    reviewersPerPaper: normalizeIntegerSetting(body.reviewersPerPaper, "10"),
-    reviewerMaxManuscripts: normalizeIntegerSetting(body.reviewerMaxManuscripts, "3"),
-    reviewerSlowMo: normalizeIntegerSetting(body.reviewerSlowMo, "500", 0),
-    reviewerRefreshWaitSeconds: normalizeIntegerSetting(body.reviewerRefreshWaitSeconds, "60"),
-    reviewerKeepOpen: Boolean(body.reviewerKeepOpen),
-    screeningStartUrl: String(body.screeningStartUrl || "").trim(),
-    screeningMaxChecked: normalizeIntegerSetting(body.screeningMaxChecked, "10"),
-    screeningScanAll: Boolean(body.screeningScanAll),
-    screeningSlowMo: normalizeIntegerSetting(body.screeningSlowMo, "500", 0),
-    screeningKeepOpen: Boolean(body.screeningKeepOpen),
-    assessmentModel: String(body.assessmentModel || DEFAULT_ASSESSMENT_MODEL).trim(),
-    assessmentReasoningEffort: normalizeAssessmentReasoningEffort(
-      body.assessmentReasoningEffort
-    ),
-    assessmentTimeoutSeconds: normalizeIntegerSetting(body.assessmentTimeoutSeconds, "120", 10),
-    assessmentPrompt: String(body.assessmentPrompt || "").trim(),
-    screeningRejectMessage: String(body.screeningRejectMessage || "").trimEnd(),
-  };
-
-  if (!settings.startUrl) {
-    settings.startUrl = UI_DEFAULTS.startUrl;
-  }
-  if (!settings.rejectMessage) {
-    settings.rejectMessage = loadRejectMessage();
-  }
-  if (!settings.reviewerStartUrl) {
-    settings.reviewerStartUrl = settings.startUrl;
-  }
-  if (!settings.screeningStartUrl) {
-    settings.screeningStartUrl = settings.startUrl;
-  }
-  if (!settings.assessmentPrompt) {
-    settings.assessmentPrompt = DEFAULT_ASSESSMENT_PROMPT;
-  }
-  if (!settings.screeningRejectMessage) {
-    settings.screeningRejectMessage = DEFAULT_SCREENING_REJECT_MESSAGE;
-  }
-
+  const settings = normalizeUiSettings(body, { rejectMessage: loadRejectMessage });
   await fsp.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
@@ -369,21 +294,7 @@ function publicJob(job) {
   };
 }
 
-function normalizeIntegerSetting(value, fallback, minimum = 1) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < minimum) {
-    return fallback;
-  }
-  return String(parsed);
-}
 
-function normalizeOptionalIntegerSetting(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return "";
-  }
-  return String(parsed);
-}
 
 function envValue(key, fallback = "") {
   const value = process.env[key] ?? envDefaults[key];
@@ -411,12 +322,6 @@ function loadRejectMessage() {
   return DEFAULT_REJECT_MESSAGE;
 }
 
-function parseBool(value, fallback = false) {
-  if (value === undefined || value === null || value === "") {
-    return fallback;
-  }
-  return /^(1|true|yes|y|on)$/i.test(String(value).trim());
-}
 
 function loadEnvFile(filePath) {
   try {
