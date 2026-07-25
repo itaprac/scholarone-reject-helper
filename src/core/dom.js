@@ -141,13 +141,26 @@ export async function hasVisibleTextControl(page, pattern) {
   }).catch(() => false);
 }
 
-export async function waitForVisibleTextControl(page, pattern, timeout = TIMEOUTS.element) {
+// Odpytywanie warunku aż do skutku. ScholarOne rzadko daje zdarzenie, na które
+// dałoby się poczekać wprost, więc pętla z warunkiem jest tu regułą, a nie
+// obejściem — w odróżnieniu od gołego uśpienia na sztywną liczbę milisekund.
+export async function waitForCondition(page, predicate, {
+  timeout = TIMEOUTS.element,
+  interval = 250,
+} = {}) {
   const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await hasVisibleTextControl(page, pattern)) return true;
-    await page.waitForTimeout(200).catch(() => undefined);
+  for (;;) {
+    if (await predicate()) return true;
+    if (Date.now() >= deadline) return false;
+    await page.waitForTimeout(interval).catch(() => undefined);
   }
-  return false;
+}
+
+export async function waitForVisibleTextControl(page, pattern, timeout = TIMEOUTS.element) {
+  return waitForCondition(page, () => hasVisibleTextControl(page, pattern), {
+    timeout,
+    interval: 200,
+  });
 }
 
 export async function findHrefByText(page, pattern) {

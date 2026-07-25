@@ -21,6 +21,7 @@ import {
   evaluateAfterNavigation,
   hasVisibleTextControl,
   submitScholarOneLinkByText,
+  waitForCondition,
   waitForVisibleTextControl,
 } from "./core/dom.js";
 import {
@@ -945,15 +946,24 @@ async function isReviewerQueuePage(page, queueLabel) {
 }
 
 async function waitForReviewerQueue(page, queueLabel, timeout) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await isReviewerQueuePage(page, queueLabel)) return;
+  let expired = false;
+  const opened = await waitForCondition(page, async () => {
+    if (await isReviewerQueuePage(page, queueLabel)) return true;
+    // Wygaśnięcie sesji przerywa czekanie od razu — dalsze odpytywanie i tak by
+    // nic nie dało, a komunikat ma wskazać prawdziwą przyczynę.
     if (await isLoginPage(page)) {
-      throw new Error(`Sesja wygasła podczas otwierania kolejki ${queueLabel}.`);
+      expired = true;
+      return true;
     }
-    await page.waitForTimeout(250);
+    return false;
+  }, { timeout });
+
+  if (expired) {
+    throw new Error(`Sesja wygasła podczas otwierania kolejki ${queueLabel}.`);
   }
-  throw new Error(`ScholarOne nie otworzył właściwej kolejki ${queueLabel}.`);
+  if (!opened) {
+    throw new Error(`ScholarOne nie otworzył właściwej kolejki ${queueLabel}.`);
+  }
 }
 
 export async function detectReviewerPageState(page, queueLabel = null) {
