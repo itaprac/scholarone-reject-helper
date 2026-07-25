@@ -10,6 +10,10 @@
   --accent-soft: oklch(96% 0.025 250);
   --focus: oklch(47% 0.125 250 / 0.25);
   --danger: oklch(46% 0.14 28);
+  /* Stan pozytywny w tabeli decyzji. Chroma celowo niska: to informacja,
+     nie akcent — Control Blue zostaje jedynym głosem interakcji. */
+  --positive: oklch(48% 0.09 150);
+  --warn: oklch(52% 0.11 70);
   --danger-bg: oklch(94% 0.025 24);
   --danger-line: oklch(78% 0.06 25);
   --log-bg: oklch(22% 0.025 250);
@@ -583,7 +587,7 @@ tr.report-row.selected .report-name {
 .job-progress {
   margin: 0 0 8px;
   font: 500 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-  color: var(--muted, #64748b);
+  color: var(--muted);
   word-break: break-word;
 }
 
@@ -591,7 +595,7 @@ tr.report-row.selected .report-name {
 .doctor-line {
   margin: 4px 0 0;
   font-size: 13px;
-  color: #b45309;
+  color: var(--warn);
 }
 
 /* Tabela wyników oceny LLM. */
@@ -627,15 +631,74 @@ tr.report-row.selected .report-name {
 .results-table td {
   text-align: left;
   padding: 8px 10px;
-  border-bottom: 1px solid var(--border, #e2e8f0);
+  border-bottom: 1px solid var(--line);
   vertical-align: top;
 }
 .results-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
 
-.results-table td[data-decision="REJECT"] { color: #b91c1c; font-weight: 600; }
-.results-table td[data-decision="APPROVE"] { color: #15803d; font-weight: 600; }
-.results-table td[data-decision="ERROR"] { color: #b45309; font-weight: 600; }
+.results-table td[data-decision="REJECT"] { color: var(--danger); font-weight: 600; }
+.results-table td[data-decision="APPROVE"] { color: var(--positive); font-weight: 600; }
+.results-table td[data-decision="ERROR"] { color: var(--warn); font-weight: 600; }
 
-.row-subtitle { display: block; color: var(--muted, #64748b); font-size: 13px; margin-top: 2px; }
-.row-abstract { margin: 6px 0 0; font-size: 13px; color: var(--muted, #64748b); max-width: 70ch; }
+.row-subtitle { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.row-abstract { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 70ch; }
 .table-wrap { overflow-x: auto; }
+
+/* Zwijane sekcje dla rzeczy edytowanych rzadko: treść maila, prompt oceny,
+   historia uruchomień. Zwinięte nie konkurują z codziennym przepływem. */
+.folded-settings > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 10px 0;
+  font-weight: 650;
+  font-size: 15px;
+  color: var(--text);
+}
+
+/* display:flex usuwa domyslny ::marker, wiec bez tego sekcja wyglada jak zwykly
+   naglowek i nie widac, ze da sie ja rozwinac. */
+.folded-settings > summary::-webkit-details-marker { display: none; }
+.folded-settings > summary > span:first-child::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+}
+.folded-settings[open] > summary > span:first-child::before { content: "▾"; }
+
+.folded-settings > summary:hover { color: var(--accent); }
+.folded-settings > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.folded-settings .fold-status {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-history {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.job-history li {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-history li:last-child { border-bottom: 0; }
+.job-history-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.job-history-what { font-weight: 600; }
+.job-history-outcome { color: var(--muted); }
+.job-history li[data-status="failed"] .job-history-outcome { color: var(--danger); }

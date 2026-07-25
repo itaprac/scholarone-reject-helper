@@ -105,13 +105,6 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { job: startJob("reject-from-report", args) });
     }
 
-    if (url.pathname === "/api/run/reviewers/prepare" && req.method === "POST") {
-      const body = await readJsonBody(req);
-      validateRunOptions(body, "reviewers-prepare");
-      const args = buildReviewerJobArgs("reviewers-prepare", body);
-      return sendJson(res, { job: startJob("reviewers-prepare", args, scholarOneScript) });
-    }
-
     if (url.pathname === "/api/run/reviewers/invite" && req.method === "POST") {
       const body = await readJsonBody(req);
       validateRunOptions(body, "reviewers-invite");
@@ -199,6 +192,11 @@ async function listReports() {
     const stat = await fsp.stat(absolutePath);
     const payload = await readJsonFile(absolutePath);
     const result = payload?.result || {};
+
+    // Przebiegi wyboru recenzentów zapisują się do tego samego katalogu, ale
+    // nie mają czego odrzucać. Bez tego filtra zajmowały większość tabeli
+    // wierszami z zerami, których nie da się użyć.
+    if (!result.report) continue;
     const summary = result.summary || buildSummaryFromResult(result);
     const progressPath = absolutePath.replace(/\.json$/i, ".progress.json");
     const progress = await readJsonFile(progressPath);

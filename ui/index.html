@@ -113,22 +113,21 @@
       </section>
 
       <section class="band message-section">
-        <div class="section-title">
-          <div>
-            <p class="eyebrow">Message</p>
-            <h2>Reject email body</h2>
-            <p class="section-copy">This text is used for live and report-based rejection runs.</p>
+        <details class="folded-settings">
+          <summary>
+            <span>Reject email body</span>
+            <span id="settingsStatus" class="fold-status" role="status" aria-live="polite">Not saved</span>
+          </summary>
+          <p class="section-copy">Ten tekst trafia do wiadomości w przebiegach live i z raportu.</p>
+          <label class="message-label">
+            <span class="sr-only">Reject email body</span>
+            <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
+          </label>
+          <div class="actions">
+            <button id="saveSettingsBtn" type="button">Save settings</button>
+            <button id="resetSettingsBtn" type="button">Reset saved settings</button>
           </div>
-          <span id="settingsStatus" role="status" aria-live="polite">Not saved</span>
-        </div>
-        <label class="message-label">
-          <span class="sr-only">Reject email body</span>
-          <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
-        </label>
-        <div class="actions">
-          <button id="saveSettingsBtn" type="button">Save settings</button>
-          <button id="resetSettingsBtn" type="button">Reset saved settings</button>
-        </div>
+        </details>
       </section>
       </div>
 
@@ -176,11 +175,14 @@
             <span class="operation-note">Live APPROVE completes both checklist items and assigns Wojciech Sałabun as EIC and AE. Live REJECT sends the configured rejection email.</span>
           </div>
 
-          <label class="assessment-prompt-label">
-            Assessment rules
-            <textarea id="assessmentPrompt" rows="16" required spellcheck="true"></textarea>
-            <span>Edit the complete assessment prompt here and save it with “Save assessment settings”. The helper appends the manuscript title, abstract, and strict JSON output contract.</span>
-          </label>
+          <details class="folded-settings">
+            <summary><span>Assessment rules</span></summary>
+            <label class="assessment-prompt-label">
+              <span class="sr-only">Assessment rules</span>
+              <textarea id="assessmentPrompt" rows="16" required spellcheck="true"></textarea>
+              <span>Helper dokleja tytuł, abstrakt i ścisły kontrakt JSON. Zapisz przez „Save assessment settings”.</span>
+            </label>
+          </details>
 
           <label class="assessment-prompt-label">
             Live rejection email
@@ -319,10 +321,9 @@
           </details>
 
           <div class="actions run-actions">
-            <button id="prepareReviewersBtn" type="button">Prepare one paper</button>
-            <button id="inviteReviewersBtn" type="button" class="danger">Select + invite batch</button>
+            <button id="inviteReviewersBtn" type="button" class="danger">Select + invite</button>
           </div>
-          <p class="action-help"><strong>Prepare one paper</strong> opens the final popup but does not send. <strong>Select + invite batch</strong> sends invitations and verifies every paper before continuing.</p>
+          <p class="action-help">Dobiera recenzentów i wysyła zaproszenia. Każdy artykuł jest potwierdzany statusami przed przejściem do następnego. Wysyłki nie da się cofnąć.</p>
 
           <div class="actions reviewer-settings-actions">
             <button id="saveReviewerSettingsBtn" type="button">Save reviewer settings</button>
@@ -341,6 +342,10 @@
         </div>
         <p id="jobProgress" class="job-progress" role="status" aria-live="polite" hidden>—</p>
         <pre id="jobOutput">No active job.</pre>
+        <details class="folded-settings run-history">
+          <summary><span>Ostatnie uruchomienia</span></summary>
+          <ul id="jobHistory" class="job-history"></ul>
+        </details>
       </section>
     </main>
 

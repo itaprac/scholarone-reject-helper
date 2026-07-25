@@ -53,6 +53,7 @@ const els = {
   stopBtn: document.getElementById("stopBtn"),
   jobOutput: document.getElementById("jobOutput"),
   jobProgress: document.getElementById("jobProgress"),
+  jobHistory: document.getElementById("jobHistory"),
   doctorLine: document.getElementById("doctorLine"),
   reviewerQueue: document.getElementById("reviewerQueue"),
   reviewerMaxManuscripts: document.getElementById("reviewerMaxManuscripts"),
@@ -62,7 +63,6 @@ const els = {
   reviewerRefreshWaitSeconds: document.getElementById("reviewerRefreshWaitSeconds"),
   reviewerKeepOpen: document.getElementById("reviewerKeepOpen"),
   reviewerBatchSummary: document.getElementById("reviewerBatchSummary"),
-  prepareReviewersBtn: document.getElementById("prepareReviewersBtn"),
   inviteReviewersBtn: document.getElementById("inviteReviewersBtn"),
   saveReviewerSettingsBtn: document.getElementById("saveReviewerSettingsBtn"),
   reviewerSettingsStatus: document.getElementById("reviewerSettingsStatus"),
@@ -116,7 +116,6 @@ bindAsyncClick(els.sendReportBtn, sendSelectedReport);
 bindAsyncClick(els.saveSettingsBtn, saveSettings);
 bindAsyncClick(els.resetSettingsBtn, resetSettings);
 bindAsyncClick(els.stopBtn, stopCurrentJob);
-bindAsyncClick(els.prepareReviewersBtn, runReviewerPreparation);
 bindAsyncClick(els.inviteReviewersBtn, runReviewerBatch);
 bindAsyncClick(els.saveReviewerSettingsBtn, saveReviewerSettings);
 bindAsyncClick(els.screeningDryRunBtn, runMetadataCollection);
@@ -130,6 +129,7 @@ if (els.refreshScreeningRunsBtn) bindAsyncClick(els.refreshScreeningRunsBtn, ref
 refresh().catch(showError);
 refreshDoctor().catch(() => undefined);
 refreshScreeningRuns().catch(() => undefined);
+refreshJobHistory().catch(() => undefined);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -159,6 +159,51 @@ async function refresh() {
   renderReports();
   renderJob();
   updateActionState();
+}
+
+// Joby przeżywają restart panelu (logs/jobs/), więc "co i kiedy odpalałem"
+// jest dostępne bez grzebania w logach.
+async function refreshJobHistory() {
+  if (!els.jobHistory) return;
+
+  const { jobs } = await api("/api/jobs");
+  els.jobHistory.replaceChildren();
+
+  if (jobs.length === 0) {
+    const empty = document.createElement("li");
+    empty.textContent = "Brak zapisanych uruchomień.";
+    els.jobHistory.append(empty);
+    return;
+  }
+
+  for (const job of jobs) {
+    const item = document.createElement("li");
+    item.dataset.status = job.status;
+
+    const when = document.createElement("span");
+    when.className = "job-history-when";
+    when.textContent = job.startedAt ? formatReportDate(job.startedAt) : "—";
+
+    const what = document.createElement("span");
+    what.className = "job-history-what";
+    what.textContent = job.type;
+
+    const outcome = document.createElement("span");
+    outcome.className = "job-history-outcome";
+    outcome.textContent = describeJobOutcome(job);
+
+    item.append(when, what, outcome);
+    els.jobHistory.append(item);
+  }
+}
+
+function describeJobOutcome(job) {
+  const progress = job.progress || {};
+  const parts = [job.status];
+  if (progress.sent) parts.push(`wysłane ${progress.sent}`);
+  if (progress.checked) parts.push(`sprawdzone ${progress.checked}`);
+  if (progress.errors) parts.push(`błędy ${progress.errors}`);
+  return parts.join(" · ");
 }
 
 async function refreshScreeningRuns() {
@@ -353,19 +398,6 @@ async function sendSelectedReport() {
   setJob(payload.job);
 }
 
-async function runReviewerPreparation() {
-  if (!validateInputs(reviewerInputs())) return;
-
-  const payload = await api("/api/run/reviewers/prepare", {
-    method: "POST",
-    body: JSON.stringify({
-      ...reviewerOptions(),
-      reviewerMaxManuscripts: "1",
-      reviewerKeepOpen: true,
-    }),
-  });
-  setJob(payload.job);
-}
 
 async function runReviewerBatch() {
   if (!validateInputs(reviewerInputs())) return;
@@ -506,6 +538,7 @@ function openStream(jobId) {
       updateActionState();
       closeStream();
       refresh().catch(showError);
+      refreshJobHistory().catch(() => undefined);
     }
   });
 
@@ -726,7 +759,6 @@ function updateActionState() {
   els.dryRunBtn.disabled = jobRunning;
   els.liveRunBtn.disabled = jobRunning;
   els.sendReportBtn.disabled = jobRunning || !state.selectedReportPath;
-  els.prepareReviewersBtn.disabled = jobRunning;
   els.inviteReviewersBtn.disabled = jobRunning;
   els.screeningDryRunBtn.disabled = jobRunning;
   els.screeningLiveRunBtn.disabled = jobRunning;
