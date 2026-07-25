@@ -1,6 +1,8 @@
 // Wstępna ocena artykułów: zebranie metadanych, ocena LLM i — w trybie live —
 // wykonanie decyzji w ScholarOne.
-import { deriveSimulatedContinuation, runCodexAssessment } from "../llm-assessment.js";
+import { deriveSimulatedContinuation } from "../llm-assessment.js";
+import { createAssessmentProvider } from "../assessment/provider.js";
+import { createTaskPool } from "../assessment/pool.js";
 import { buildScreeningBatchResult } from "../screening-batch.js";
 import { buildAutomaticRevisionAssessment, classifyScreeningManuscript } from "../screening-assessment.js";
 import { hasUnusualActivityAlert, openAndReadAbstract, readManuscriptSummary, waitForManuscriptMetadataReady } from "../screening-metadata.js";
@@ -8,21 +10,30 @@ import { approveAndAssignEditors } from "../screening-approval.js";
 import { formatSingleAssessmentUsage } from "../reporting/artifacts.js";
 import { clickRejectAndFillEmail, clickSaveAndSend } from "../steps/reject-email.js";
 import {
-  countViewDetailsControls,
   goToNextDocument,
-  navigateToCompleteChecklistQueue,
   openNextUnseenViewDetailsAcrossQueuePages,
   returnToList,
   waitForDetailsPageOrRelogin,
 } from "../steps/queue.js";
-import path from "node:path";
 import { isRevisionManuscriptId, normalizeManuscriptId } from "../manuscript-rules.js";
-import { projectRoot } from "../config/defaults.js";
 import { clickCompleteChecklist } from "../steps/checklist.js";
 import { ensureManuscriptListReady, inspectCurrentManuscript } from "../steps/queue.js";
-import { context, formatRejectedProgress, hasMaxRejectedLimit } from "./context.js";
+import { context } from "./context.js";
 
 export async function runMetadataCollection(page) {
+  const provider = createAssessmentProvider(context.config, {
+    runId: context.runId,
+    log: context.log,
+  });
+
+  // W trybie live ocena musi poprzedzać kliknięcie na otwartej stronie, więc
+  // pula jest wtedy jednoelementowa i pętla zachowuje się jak dotąd.
+  const pool = createTaskPool({
+    concurrency: context.config.applyAssessmentDecisions
+      ? 1
+      : context.config.assessmentConcurrency || 3,
+  });
+
   let checked = 0;
   let hasOpenDetailsPage = false;
   let queueExhausted = false;
@@ -121,6 +132,50 @@ export async function runMetadataCollection(page) {
     let assessmentError = null;
     let decisionAction = null;
     let actionError = null;
+
+    // Rekord trafia do wyniku od razu, a ocena dopisuje się do niego później.
+    // Dzięki temu w dry-runie przeglądarka może iść dalej, nie czekając na model.
+    const record = {
+      metadata,
+      assessment: null,
+      continuation: null,
+      assessmentError: null,
+      decisionAction: null,
+      actionError: null,
+      screenshot,
+    };
+
+    // Ocena odłożona: tylko wtedy, gdy nic nie zależy od jej wyniku na tej
+    // stronie. W trybie live decyzja musi być znana przed kliknięciem.
+    const deferAssessment =
+      !isRevision && context.config.assessWithLlm && !context.config.applyAssessmentDecisions;
+
+    if (deferAssessment) {
+      manuscripts.push(record);
+      const checkedAt = checked;
+      await pool.add(() => assessIntoRecord(provider, record, checkedAt));
+
+      await context.log("metadata_batch_progress", {
+        checked,
+        eligibleCount: manuscripts.length,
+        skippedUnusualActivityCount: skippedUnusualActivity.length,
+        latestManuscriptId: summary.manuscriptId,
+        assessmentDeferred: true,
+        assessmentsPending: pool.pending,
+      });
+
+      if (!context.config.scanAllMetadata && checked >= context.config.maxChecked) {
+        break;
+      }
+
+      const movedNextDeferred = await goToNextDocument(page);
+      if (!movedNextDeferred) {
+        await returnToList(page);
+        hasOpenDetailsPage = false;
+      }
+      continue;
+    }
+
     if (isRevision) {
       assessment = buildAutomaticRevisionAssessment(summary.manuscriptId);
       continuation = deriveSimulatedContinuation(assessment.decision);
@@ -134,23 +189,12 @@ export async function runMetadataCollection(page) {
       console.log(`[AUTO APPROVE] ${summary.manuscriptId}: rewizja .R + liczba; pomijam abstrakt i LLM.`);
       logAssessmentBranch(continuation);
     } else if (context.config.assessWithLlm) {
-      const llmOutputPath = path.join(
-        context.config.logsDir,
-        "screening",
-        `${context.runId}-${summary.manuscriptId}-llm.json`
-      );
+      const llmOutputPath = provider.outputPathFor(summary.manuscriptId);
       console.log(
-        `[LLM] Wysyłam tytuł i abstrakt do Codex CLI (${context.config.assessmentModel}, reasoning: ${context.config.assessmentReasoningEffort})...`
+        `[LLM] Wysyłam tytuł i abstrakt do modelu (${context.config.assessmentModel}, reasoning: ${context.config.assessmentReasoningEffort})...`
       );
       try {
-        assessment = await runCodexAssessment(metadata, {
-          instructions: context.config.assessmentPrompt,
-          model: context.config.assessmentModel,
-          reasoningEffort: context.config.assessmentReasoningEffort,
-          timeoutMs: context.config.assessmentTimeoutSeconds * 1000,
-          outputPath: llmOutputPath,
-          cwd: projectRoot,
-        });
+        assessment = await provider.assess(metadata);
         continuation = deriveSimulatedContinuation(assessment.decision);
 
         await context.log("llm_assessment_completed", {
@@ -171,7 +215,11 @@ export async function runMetadataCollection(page) {
           llmEventsPath: assessment.eventsPath,
         });
         console.log(`[LLM RESULT] ${assessment.decision}: ${assessment.reason}`);
-        console.log(`[LLM USAGE] ${formatSingleAssessmentUsage(assessment.usage)}, czas=${assessment.durationMs} ms`);
+        if (assessment.cached) {
+          console.log(`[LLM CACHE] wynik z ${assessment.cachedAt} — bez ponownego wywołania modelu`);
+        } else {
+          console.log(`[LLM USAGE] ${formatSingleAssessmentUsage(assessment.usage)}, czas=${assessment.durationMs} ms`);
+        }
         logAssessmentBranch(continuation);
       } catch (error) {
         assessmentError = {
@@ -263,6 +311,16 @@ export async function runMetadataCollection(page) {
     }
   }
 
+  // Odłożone oceny muszą się domknąć, zanim powstanie raport — inaczej trafiłby
+  // do niego rekord bez decyzji.
+  const drained = await pool.drain();
+  if (drained.results.length > 0) {
+    await context.log("assessment_pool_drained", {
+      assessments: drained.results.length,
+      failures: drained.failures,
+    });
+  }
+
   return buildScreeningBatchResult({
     checked,
     skippedUnusualActivity,
@@ -273,6 +331,59 @@ export async function runMetadataCollection(page) {
     maxChecked: context.config.maxChecked,
     queueExhausted,
   });
+}
+
+// Ocena wykonywana poza pętlą przeglądarki. Wynik dopisuje się do rekordu, który
+// jest już w wyniku przebiegu; błąd modelu nie przerywa pozostałych ocen.
+async function assessIntoRecord(provider, record, checked) {
+  const { manuscriptId } = record.metadata;
+  const llmOutputPath = provider.outputPathFor(manuscriptId);
+
+  try {
+    const assessment = await provider.assess(record.metadata);
+    record.assessment = assessment;
+    record.continuation = deriveSimulatedContinuation(assessment.decision);
+
+    await context.log("llm_assessment_completed", {
+      checked,
+      manuscriptId,
+      provider: assessment.provider,
+      model: assessment.model,
+      reasoningEffort: assessment.reasoningEffort,
+      mode: assessment.mode,
+      decision: assessment.decision,
+      reason: assessment.reason,
+      durationMs: assessment.durationMs,
+      usage: assessment.usage,
+      cached: Boolean(assessment.cached),
+      threadId: assessment.threadId,
+      eventCount: assessment.eventCount,
+      continuationAction: record.continuation.action,
+      llmOutputPath,
+      llmEventsPath: assessment.eventsPath,
+    });
+
+    const usage = assessment.cached
+      ? `cache z ${assessment.cachedAt}`
+      : `${formatSingleAssessmentUsage(assessment.usage)}, czas=${assessment.durationMs} ms`;
+    console.log(`[LLM RESULT] ${manuscriptId} ${assessment.decision}: ${assessment.reason}`);
+    console.log(`[LLM USAGE] ${manuscriptId} ${usage}`);
+    logAssessmentBranch(record.continuation);
+  } catch (error) {
+    record.assessmentError = {
+      message: error.message,
+      outputPath: llmOutputPath,
+      eventsPath: error.eventsPath || null,
+    };
+    await context.log("llm_assessment_failed", {
+      checked,
+      manuscriptId,
+      message: error.message,
+      llmOutputPath,
+      llmEventsPath: error.eventsPath || null,
+    });
+    console.error(`[LLM ERROR] ${manuscriptId}: ${error.message}`);
+  }
 }
 
 export function logAssessmentBranch(continuation) {

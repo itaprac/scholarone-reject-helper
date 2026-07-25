@@ -34,6 +34,9 @@ export const DEFAULTS = Object.freeze({
   assessmentModel: DEFAULT_ASSESSMENT_MODEL,
   assessmentReasoningEffort: DEFAULT_ASSESSMENT_REASONING_EFFORT,
   assessmentTimeoutSeconds: 120,
+  // Ocena to podproces, nie ruch sieciowy z tej maszyny — trójka trzyma
+  // obciążenie w ryzach, a i tak usuwa większość czasu bezczynności.
+  assessmentConcurrency: 3,
 
   // Katalogi.
   profileDir: path.join(projectRoot, "playwright-profile"),

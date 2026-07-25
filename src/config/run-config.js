@@ -72,6 +72,14 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
       args["assessment-timeout-seconds"] || env.ASSESSMENT_TIMEOUT_SECONDS,
       DEFAULTS.assessmentTimeoutSeconds
     ),
+    // Ile ocen naraz w dry-runie. W trybie live i tak schodzi do jednej, bo
+    // decyzja musi poprzedzać kliknięcie.
+    assessmentConcurrency: toInteger(
+      args["assessment-concurrency"] || env.ASSESSMENT_CONCURRENCY,
+      DEFAULTS.assessmentConcurrency
+    ),
+    assessmentCache: parseBool(args["assessment-cache"] ?? env.ASSESSMENT_CACHE, true) &&
+      args["no-cache"] !== true,
     assessmentPrompt: loadTextOption(args, env, {
       fileArg: "assessment-prompt-file",
       fileEnv: "ASSESSMENT_PROMPT_FILE",
