@@ -1,5 +1,3 @@
-import { chromium } from "playwright";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +14,31 @@ import { isRevisionManuscriptId } from "./manuscript-rules.js";
 import { hasUnusualActivityAlert } from "./screening-metadata.js";
 import { createScreenshotWriter } from "./core/screenshots.js";
 import { pruneLogs } from "./core/log-retention.js";
+import { createBrowserSession } from "./core/browser.js";
+import {
+  activateLinkByText,
+  clickTextControl,
+  evaluateAfterNavigation,
+  hasVisibleTextControl,
+  submitScholarOneLinkByText,
+  waitForVisibleTextControl,
+} from "./core/dom.js";
+import {
+  ensureHeaderSearchReady,
+  openManageMenu,
+  waitForNavigation,
+} from "./core/navigation.js";
+import {
+  loadEnvFile,
+  loadLoginCredentials,
+  nonNegativeInteger,
+  parseArgs,
+  parseBool,
+  positiveInteger,
+} from "./core/env.js";
+import { createLogger, waitUntilInterrupted } from "./core/logger.js";
+import { readLoginFailureText } from "./core/login.js";
+import { TIMEOUTS } from "./core/timeouts.js";
 import { DEFAULTS } from "./config/defaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -41,7 +64,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
 
   const session = await createBrowserSession(config);
   const { page } = session;
-  page.setDefaultTimeout(15_000);
+  page.setDefaultTimeout(TIMEOUTS.default);
   let batchIndex = 0;
 
   try {
@@ -748,34 +771,6 @@ function buildConfig(args, env, credentials) {
   return config;
 }
 
-async function createBrowserSession(config) {
-  if (config.cdp) {
-    const browser = await chromium.connectOverCDP(config.cdp, {
-      noDefaults: true,
-      slowMo: config.slowMo,
-    });
-    const context = browser.contexts()[0];
-    if (!context) throw new Error(`Brak kontekstu Chrome pod ${config.cdp}`);
-    const page = context.pages().find((candidate) => /manuscriptcentral\.com/i.test(candidate.url())) ||
-      context.pages()[0] || await context.newPage();
-    return {
-      page,
-      close: () => browser.close().catch(() => undefined),
-    };
-  }
-
-  const context = await chromium.launchPersistentContext(config.profileDir, {
-    channel: config.browserChannel || undefined,
-    headless: config.headless,
-    slowMo: config.slowMo,
-    viewport: { width: 1440, height: 1000 },
-  });
-  return {
-    page: context.pages()[0] || await context.newPage(),
-    close: () => context.close(),
-  };
-}
-
 async function ensureLoggedIn(page, config, log, reason = "unknown") {
   if (!(await isLoginPage(page))) {
     await log("login_not_required", { reason, url: page.url() });
@@ -867,23 +862,6 @@ async function waitForReviewerLoggedIn(page, timeout) {
       Boolean(document.querySelector("#QUICK_SEARCH_HEADER_SEARCH_TEXT"));
     return loggedInMarker && !passwordVisible;
   }, null, { timeout }).then(() => true).catch(() => false);
-}
-
-async function readLoginFailureText(page) {
-  return page.evaluate(() => {
-    const visible = (element) => {
-      const rect = element.getBoundingClientRect();
-      const style = window.getComputedStyle(element);
-      return rect.width > 0 && rect.height > 0 &&
-        style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-    };
-    const messages = Array.from(document.querySelectorAll(
-      ".alert, .alert-error, .error, .errors, .text-error, #error, [role='alert'], .help-inline"
-    )).filter(visible).map((element) => (element.innerText || "").replace(/\s+/g, " ").trim());
-    return messages.find((text) =>
-      /invalid|incorrect|required|captcha|locked|expired|failed|error|not\s+recognized/i.test(text)
-    )?.slice(0, 300) || null;
-  }).catch(() => null);
 }
 
 async function ensureReviewerQueue(page, config, log, queueLabel) {
@@ -1108,239 +1086,6 @@ async function findQuickSearchReviewerAction(page, manuscriptId) {
     }
     return null;
   }, { selector: REVIEWER_SELECTORS.queueAction, targetId: manuscriptId }).catch(() => null);
-}
-
-async function ensureHeaderSearchReady(page) {
-  const input = page.locator("#QUICK_SEARCH_HEADER_SEARCH_TEXT").first();
-  if (await input.isVisible({ timeout: 1_500 }).catch(() => false)) return true;
-
-  const toggle = page.locator("#headerSearchbar").first();
-  if (await toggle.isVisible({ timeout: 1_500 }).catch(() => false)) {
-    await toggle.click({ timeout: 3_000 }).catch(() => undefined);
-    await page.waitForTimeout(300);
-  }
-  if (await input.isVisible({ timeout: 3_000 }).catch(() => false)) return true;
-
-  await page.evaluate(() => {
-    const toggleControl = document.querySelector("#headerSearchbar");
-    if (!toggleControl) return false;
-    toggleControl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    toggleControl.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-    toggleControl.click();
-    return true;
-  }).catch(() => false);
-  return input.isVisible({ timeout: 3_000 }).catch(() => false);
-}
-
-async function openManageMenu(page) {
-  const locators = [
-    page.getByRole("link", { name: /\bmanage\b/i }).first(),
-    page.getByRole("button", { name: /\bmanage\b/i }).first(),
-    page.getByText(/\bManage\b/i).first(),
-    page.locator("a, button, li, span, div").filter({ hasText: /\bManage\b/i }).first(),
-  ];
-
-  for (const locator of locators) {
-    if ((await locator.count().catch(() => 0)) === 0) continue;
-    await locator.scrollIntoViewIfNeeded().catch(() => undefined);
-
-    for (const action of ["hover", "click", "arrow-click"]) {
-      if (action === "hover") {
-        await locator.hover({ force: true, timeout: 1500 }).catch(() => undefined);
-      } else if (action === "click") {
-        await locator.click({ force: true, timeout: 1500 }).catch(() => undefined);
-      } else {
-        const box = await locator.boundingBox().catch(() => null);
-        if (box) {
-          await page.mouse.move(box.x + box.width - 8, box.y + box.height / 2);
-          await page.mouse.click(box.x + box.width - 8, box.y + box.height / 2);
-        }
-      }
-
-      await page.waitForTimeout(800);
-      if (await hasVisibleTextControl(page, /^admin\s+center$/i)) return true;
-    }
-  }
-
-  return false;
-}
-
-async function waitForVisibleTextControl(page, pattern, timeout) {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    if (await hasVisibleTextControl(page, pattern)) return true;
-    await page.waitForTimeout(250);
-  }
-  return false;
-}
-
-async function hasVisibleTextControl(page, pattern) {
-  return page.evaluate((source) => {
-    const regex = new RegExp(source, "i");
-    return Array.from(document.querySelectorAll(
-      "a, button, input[type='button'], input[type='submit'], [onclick], [role='button'], li, div, span"
-    )).some((element) => {
-      const rect = element.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return false;
-      const style = window.getComputedStyle(element);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
-      const text = [
-        element.textContent,
-        element.getAttribute("value"),
-        element.getAttribute("title"),
-        element.getAttribute("aria-label"),
-        element.getAttribute("alt"),
-      ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-      return text.length <= 160 && regex.test(text);
-    });
-  }, pattern.source).catch(() => false);
-}
-
-async function clickTextControl(page, pattern) {
-  let clicked = false;
-  try {
-    clicked = await page.evaluate((source) => {
-      const regex = new RegExp(source, "i");
-      const candidates = Array.from(document.querySelectorAll(
-        "a, button, input[type='button'], input[type='submit'], [onclick], [role='button'], li, div, span"
-      )).map((element) => {
-        const text = [
-          element.textContent,
-          element.getAttribute("value"),
-          element.getAttribute("title"),
-          element.getAttribute("aria-label"),
-          element.getAttribute("alt"),
-        ].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-        const rect = element.getBoundingClientRect();
-        return { element, text, rect };
-      }).filter(({ text, rect }) => regex.test(text) && text.length <= 160 && rect.width > 0 && rect.height > 0)
-        .sort((left, right) => left.text.length - right.text.length);
-      const match = candidates[0]?.element;
-      if (!match) return false;
-      const control = match.closest(
-        "a, button, input[type='button'], input[type='submit'], [onclick], [role='button'], li"
-      ) || match;
-      control.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
-      control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-      control.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
-      control.click();
-      return true;
-    }, pattern.source);
-  } catch (error) {
-    clicked = /execution context|navigation|destroyed/i.test(error.message || "");
-  }
-  if (clicked) await waitForNavigation(page, 12_000);
-  return clicked;
-}
-
-async function activateLinkByText(page, pattern) {
-  const links = page.locator("a");
-  const count = await links.count();
-  for (let index = 0; index < count; index += 1) {
-    const link = links.nth(index);
-    const text = (await link.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-    if (!pattern.test(text) || !(await link.isVisible().catch(() => false))) continue;
-    const navigation = waitForNavigation(page, 12_000);
-    await link.click({ force: true });
-    await navigation;
-    return true;
-  }
-  return false;
-}
-
-async function submitScholarOneLinkByText(page, pattern, scriptPattern = null) {
-  let submitted = false;
-  try {
-    submitted = await page.evaluate(({ source, scriptSource }) => {
-      const regex = new RegExp(source, "i");
-      const scriptRegex = scriptSource ? new RegExp(scriptSource, "i") : null;
-      const form = document.forms[0];
-      if (!form) return false;
-
-      const candidates = Array.from(document.querySelectorAll("a")).map((link) => {
-        const labels = [
-          link.textContent,
-          link.getAttribute("title"),
-          link.getAttribute("aria-label"),
-        ].filter(Boolean).map((value) => value.replace(/\s+/g, " ").trim());
-        const text = labels.filter((value) => regex.test(value)).sort((a, b) => a.length - b.length)[0] || "";
-        const script = [link.getAttribute("href") || "", link.getAttribute("onclick") || ""]
-          .join(";").replace(/^javascript:/i, "");
-        return { link, text, script };
-      }).filter(({ text, script }) => text && (!scriptRegex || scriptRegex.test(script)))
-        .sort((left, right) => left.text.length - right.text.length);
-
-      const script = candidates[0]?.script;
-      if (!script || !/set(DataAndNextPage|Field|NextPage)/i.test(script)) return false;
-
-      for (const match of script.matchAll(/setField\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\)/g)) {
-        setFormValue(match[1], decodeHtml(match[2]));
-      }
-
-      const oneData = script.match(
-        /setDataAndNextPageOneDataValue\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]+)['"]\)/
-      );
-      if (oneData) {
-        setFormValue(oneData[1], decodeHtml(oneData[2]));
-        setFormValue("NEXT_PAGE", oneData[3]);
-        submitForm();
-        return true;
-      }
-
-      const dataAndNext = script.match(
-        /setDataAndNextPage\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]+)['"]\)/
-      );
-      if (dataAndNext) {
-        setFormValue(dataAndNext[1], decodeHtml(dataAndNext[2]));
-        setFormValue("NEXT_PAGE", dataAndNext[3]);
-        submitForm();
-        return true;
-      }
-
-      const next = script.match(/setNextPage\(['"]([^'"]+)['"]\)/);
-      if (next) {
-        setFormValue("NEXT_PAGE", next[1]);
-        submitForm();
-        return true;
-      }
-      return false;
-
-      function setFormValue(name, value) {
-        let field = form.elements[name];
-        if (field && field.length && field.tagName === undefined) field = field[0];
-        if (!field) {
-          field = document.createElement("input");
-          field.type = "hidden";
-          field.name = name;
-          form.appendChild(field);
-        }
-        field.value = value;
-      }
-
-      function submitForm() {
-        if (form.elements.PAGE_LOADED_FLAG) form.elements.PAGE_LOADED_FLAG.value = "N";
-        if (window.getPostParams) window.getPostParams();
-        form.target = "";
-        HTMLFormElement.prototype.submit.call(form);
-      }
-
-      function decodeHtml(value) {
-        const textarea = document.createElement("textarea");
-        textarea.innerHTML = value;
-        return textarea.value;
-      }
-    }, {
-      source: pattern.source,
-      scriptSource: scriptPattern ? scriptPattern.source : "",
-    });
-  } catch (error) {
-    submitted = /execution context|navigation|destroyed/i.test(error.message || "");
-  }
-
-  if (!submitted) return false;
-  await waitForNavigation(page, 15_000);
-  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-  return true;
 }
 
 async function openReviewerArticle(
@@ -2218,30 +1963,6 @@ async function navigatePagination(page, selector, value) {
   );
 }
 
-async function evaluateAfterNavigation(page, pageFunction, argument) {
-  let lastError;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      return await page.evaluate(pageFunction, argument);
-    } catch (error) {
-      lastError = error;
-      if (!/execution context was destroyed|cannot find context|navigat/i.test(error?.message || "")) {
-        throw error;
-      }
-      await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
-      await page.waitForTimeout(250).catch(() => undefined);
-    }
-  }
-  throw lastError;
-}
-
-async function waitForNavigation(page, timeout) {
-  await Promise.race([
-    page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => undefined),
-    page.waitForTimeout(Math.min(timeout, 3000)).catch(() => undefined),
-  ]);
-}
-
 function summarizeReviewerList(reviewers, countTowardTarget) {
   return {
     total: reviewers.length,
@@ -2283,98 +2004,4 @@ function publicConfig(config) {
     autoLogin: config.autoLogin,
     hasLoginCredentials: Boolean(config.username && config.password),
   };
-}
-
-function createLogger(logFile) {
-  return async (type, payload = {}) => {
-    const entry = { type, at: new Date().toISOString(), ...payload };
-    await fsp.mkdir(path.dirname(logFile), { recursive: true });
-    await fsp.appendFile(logFile, `${JSON.stringify(entry)}\n`, "utf8");
-    console.log(`[select-reviewers] ${type} ${JSON.stringify(payload)}`);
-  };
-}
-
-function parseArgs(rawArgs) {
-  const parsed = {};
-  for (const arg of rawArgs) {
-    if (!arg.startsWith("--")) continue;
-    const body = arg.slice(2);
-    const index = body.indexOf("=");
-    if (index === -1) parsed[body] = true;
-    else parsed[body.slice(0, index)] = body.slice(index + 1);
-  }
-  return parsed;
-}
-
-function loadEnvFile(filePath) {
-  try {
-    return Object.fromEntries(fs.readFileSync(filePath, "utf8")
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith("#"))
-      .map((line) => {
-        const index = line.indexOf("=");
-        return index === -1 ? [line, ""] : [line.slice(0, index), line.slice(index + 1)];
-      }));
-  } catch {
-    return {};
-  }
-}
-
-function loadLoginCredentials(args, env) {
-  let username = args["login-username"] || env.LOGIN_USERNAME || "";
-  let password = args["login-password"] || env.LOGIN_PASSWORD || "";
-  const credentialsFile = args["login-credentials-file"] || env.LOGIN_CREDENTIALS_FILE || "";
-  if (credentialsFile && (!username || !password)) {
-    const absolute = path.isAbsolute(credentialsFile) ? credentialsFile : path.join(projectRoot, credentialsFile);
-    const content = fs.readFileSync(absolute, "utf8");
-    if (/^\s*[A-Z0-9_]+\s*=/im.test(content)) {
-      const fileEnv = loadEnvFile(absolute);
-      username ||= fileEnv.LOGIN_USERNAME || fileEnv.USERNAME || "";
-      password ||= fileEnv.LOGIN_PASSWORD || fileEnv.PASSWORD || "";
-    } else {
-      const lines = content.split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line && !line.startsWith("#"));
-      username ||= lines[0] || "";
-      password ||= lines[1] || "";
-    }
-  }
-  return { username, password };
-}
-
-function positiveInteger(value, fallback, label) {
-  if (value === undefined || value === null || value === "") return fallback;
-  if (!/^\d+$/.test(String(value).trim())) throw new Error(`${label} musi być dodatnią liczbą całkowitą.`);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new Error(`${label} musi być dodatnią liczbą całkowitą.`);
-  return parsed;
-}
-
-function nonNegativeInteger(value, fallback, label) {
-  if (value === undefined || value === null || value === "") return fallback;
-  if (!/^\d+$/.test(String(value).trim())) throw new Error(`${label} musi być nieujemną liczbą całkowitą.`);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) throw new Error(`${label} musi być nieujemną liczbą całkowitą.`);
-  return parsed;
-}
-
-function parseBool(value, fallback) {
-  if (value === undefined || value === null || value === "") return fallback;
-  if (typeof value === "boolean") return value;
-  return /^(1|true|yes|y|on)$/i.test(String(value).trim());
-}
-
-async function waitUntilInterrupted() {
-  await new Promise((resolve) => {
-    const interval = setInterval(() => undefined, 60_000);
-    const stop = () => {
-      clearInterval(interval);
-      process.off("SIGINT", stop);
-      process.off("SIGTERM", stop);
-      resolve();
-    };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-  });
 }
