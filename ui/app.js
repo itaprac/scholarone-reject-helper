@@ -1,7 +1,10 @@
 const state = {
   reports: [],
+  screeningRuns: [],
+  screeningRun: null,
   selectedReportPath: "",
   currentJob: null,
+  stream: null,
   pollTimer: null,
   configApplied: false,
   activeView: "reject",
@@ -49,6 +52,8 @@ const els = {
   sendReportBtn: document.getElementById("sendReportBtn"),
   stopBtn: document.getElementById("stopBtn"),
   jobOutput: document.getElementById("jobOutput"),
+  jobProgress: document.getElementById("jobProgress"),
+  doctorLine: document.getElementById("doctorLine"),
   reviewerQueue: document.getElementById("reviewerQueue"),
   reviewerMaxManuscripts: document.getElementById("reviewerMaxManuscripts"),
   reviewersPerPaper: document.getElementById("reviewersPerPaper"),
@@ -74,6 +79,11 @@ const els = {
   screeningLiveRunBtn: document.getElementById("screeningLiveRunBtn"),
   saveScreeningSettingsBtn: document.getElementById("saveScreeningSettingsBtn"),
   screeningSettingsStatus: document.getElementById("screeningSettingsStatus"),
+  screeningRunSelect: document.getElementById("screeningRunSelect"),
+  screeningDecisionFilter: document.getElementById("screeningDecisionFilter"),
+  screeningRunSummary: document.getElementById("screeningRunSummary"),
+  screeningResultsBody: document.getElementById("screeningResultsBody"),
+  refreshScreeningRunsBtn: document.getElementById("refreshScreeningRunsBtn"),
 };
 
 els.rejectTab.addEventListener("click", () => activateView("reject"));
@@ -113,7 +123,13 @@ bindAsyncClick(els.screeningDryRunBtn, runMetadataCollection);
 bindAsyncClick(els.screeningLiveRunBtn, runLiveAssessment);
 bindAsyncClick(els.saveScreeningSettingsBtn, saveScreeningSettings);
 
+els.screeningRunSelect?.addEventListener("change", () => loadScreeningRun().catch(showError));
+els.screeningDecisionFilter?.addEventListener("change", renderScreeningResults);
+if (els.refreshScreeningRunsBtn) bindAsyncClick(els.refreshScreeningRunsBtn, refreshScreeningRuns);
+
 refresh().catch(showError);
+refreshDoctor().catch(() => undefined);
+refreshScreeningRuns().catch(() => undefined);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -143,6 +159,141 @@ async function refresh() {
   renderReports();
   renderJob();
   updateActionState();
+}
+
+async function refreshScreeningRuns() {
+  if (!els.screeningRunSelect) return;
+
+  const { runs } = await api("/api/screening/runs");
+  state.screeningRuns = runs;
+  els.screeningRunSelect.replaceChildren();
+
+  if (runs.length === 0) {
+    els.screeningRunSummary.textContent = "Brak zapisanych przebiegów";
+    els.screeningResultsBody.replaceChildren();
+    return;
+  }
+
+  for (const run of runs) {
+    const option = document.createElement("option");
+    option.value = run.filename;
+    const when = run.createdAt ? formatReportDate(run.createdAt) : run.runId;
+    option.textContent = `${when} · ${run.manuscriptCount} art. ${run.live ? "· live" : ""}`.trim();
+    els.screeningRunSelect.append(option);
+  }
+
+  await loadScreeningRun();
+}
+
+async function loadScreeningRun() {
+  const filename = els.screeningRunSelect?.value;
+  if (!filename) return;
+
+  const { run } = await api(`/api/screening/runs/${encodeURIComponent(filename)}`);
+  state.screeningRun = run;
+  renderScreeningResults();
+}
+
+function renderScreeningResults() {
+  const run = state.screeningRun;
+  if (!run || !els.screeningResultsBody) return;
+
+  const filter = els.screeningDecisionFilter?.value || "";
+  const rows = run.manuscripts.filter((row) => {
+    if (!filter) return true;
+    if (filter === "ERROR") return Boolean(row.assessmentError || row.actionError);
+    return row.decision === filter;
+  });
+
+  const summary = run.summary || {};
+  els.screeningRunSummary.textContent = [
+    `${run.manuscripts.length} artykułów`,
+    summary.approved !== undefined ? `APPROVE ${summary.approved}` : null,
+    summary.rejected !== undefined ? `REJECT ${summary.rejected}` : null,
+    summary.assessmentErrors ? `błędy ${summary.assessmentErrors}` : null,
+    run.live ? "tryb live" : "dry run",
+  ].filter(Boolean).join(" · ");
+
+  els.screeningResultsBody.replaceChildren();
+
+  if (rows.length === 0) {
+    const empty = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.colSpan = 5;
+    cell.textContent = "Brak wyników dla wybranego filtra.";
+    empty.append(cell);
+    els.screeningResultsBody.append(empty);
+    return;
+  }
+
+  for (const row of rows) {
+    els.screeningResultsBody.append(screeningRow(row));
+  }
+}
+
+function screeningRow(row) {
+  const tr = document.createElement("tr");
+
+  const idCell = document.createElement("td");
+  const id = document.createElement("strong");
+  id.textContent = row.manuscriptId || "—";
+  const title = document.createElement("span");
+  title.className = "row-subtitle";
+  title.textContent = row.title;
+  // Abstrakt bywa długi; pokazujemy go dopiero na żądanie.
+  const details = document.createElement("details");
+  const label = document.createElement("summary");
+  label.textContent = "abstrakt";
+  const abstract = document.createElement("p");
+  abstract.className = "row-abstract";
+  abstract.textContent = row.abstract || "(brak)";
+  details.append(label, abstract);
+  idCell.append(id, title, details);
+
+  const decisionCell = document.createElement("td");
+  decisionCell.textContent = row.decision || (row.assessmentError ? "BŁĄD" : "—");
+  decisionCell.dataset.decision = row.decision || (row.assessmentError ? "ERROR" : "");
+  if (row.cached) decisionCell.title = "wynik z cache";
+
+  const reasonCell = document.createElement("td");
+  reasonCell.textContent = row.assessmentError || row.reason || "—";
+
+  const tokensCell = document.createElement("td");
+  tokensCell.className = "numeric";
+  tokensCell.textContent = row.cached ? "cache" : (row.totalTokens ?? "—");
+
+  const actionCell = document.createElement("td");
+  actionCell.textContent = row.actionError
+    ? `błąd: ${row.actionError}`
+    : row.actionCompleted
+      ? `wykonano ${row.actionDecision}`
+      : "—";
+
+  tr.append(idCell, decisionCell, reasonCell, tokensCell, actionCell);
+  return tr;
+}
+
+// Preflight przy starcie panelu. Pokazujemy tylko to, co wymaga uwagi — przy
+// sprawnym środowisku linijka zostaje ukryta i nie zabiera miejsca.
+async function refreshDoctor() {
+  if (!els.doctorLine) return;
+
+  try {
+    const { checks } = await api("/api/doctor");
+    const problems = checks.filter((check) => check.status !== "ok");
+
+    if (problems.length === 0) {
+      els.doctorLine.hidden = true;
+      return;
+    }
+
+    els.doctorLine.hidden = false;
+    els.doctorLine.textContent = problems
+      .map((check) => `${check.name}: ${check.detail}${check.hint ? ` — ${check.hint}` : ""}`)
+      .join(" · ");
+  } catch {
+    els.doctorLine.hidden = true;
+  }
 }
 
 async function runDryRun() {
@@ -308,14 +459,62 @@ function setJob(job) {
   renderJob();
   updateActionState();
 
+  closeStream();
+  if (job && ["running", "stopping"].includes(job.status)) {
+    openStream(job.id);
+  }
+}
+
+function closeStream() {
+  state.stream?.close();
+  state.stream = null;
   if (state.pollTimer) {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
   }
+}
 
-  if (job && ["running", "stopping"].includes(job.status)) {
-    state.pollTimer = setInterval(pollJob, 1500);
-  }
+// Serwer wypycha przyrost, zamiast oddawać cały bufor przy każdym odpytaniu.
+// Polling zostaje wyłącznie jako zapasowa ścieżka, gdyby strumień padł.
+function openStream(jobId) {
+  const stream = new EventSource(`/api/jobs/${jobId}/stream`);
+  state.stream = stream;
+
+  stream.addEventListener("message", (event) => {
+    const payload = JSON.parse(event.data);
+
+    if (payload.type === "snapshot" && payload.job) {
+      state.currentJob = payload.job;
+      renderJob();
+      updateActionState();
+      return;
+    }
+
+    if (payload.type === "output" && state.currentJob) {
+      // Doklejamy ogon zamiast przerysowywać całość — scroll przestaje skakać.
+      state.currentJob.output = (state.currentJob.output || "") + payload.chunk;
+      state.currentJob.offset = payload.offset;
+      state.currentJob.progress = payload.progress;
+      appendJobOutput(payload.chunk);
+      renderProgress(payload.progress);
+      return;
+    }
+
+    if (payload.type === "status" && payload.job) {
+      state.currentJob = payload.job;
+      renderJob();
+      updateActionState();
+      closeStream();
+      refresh().catch(showError);
+    }
+  });
+
+  stream.addEventListener("error", () => {
+    closeStream();
+    if (!state.pollTimer) {
+      state.pollTimer = setInterval(pollJob, 2000);
+    }
+  });
 }
 
 async function pollJob() {
@@ -324,14 +523,58 @@ async function pollJob() {
   }
 
   try {
-    const payload = await api(`/api/jobs/${state.currentJob.id}`);
-    setJob(payload.job);
+    const since = state.currentJob.offset || 0;
+    const payload = await api(`/api/jobs/${state.currentJob.id}?since=${since}`);
+    if (payload.job) {
+      const merged = {
+        ...payload.job,
+        output: (state.currentJob.output || "") + (payload.job.output || ""),
+      };
+      state.currentJob = merged;
+      renderJob();
+      updateActionState();
+    }
     if (!payload.job || !["running", "stopping"].includes(payload.job.status)) {
+      closeStream();
       await refresh();
     }
   } catch (error) {
     showError(error);
   }
+}
+
+function appendJobOutput(chunk) {
+  const atBottom =
+    els.jobOutput.scrollHeight - els.jobOutput.scrollTop - els.jobOutput.clientHeight < 40;
+  els.jobOutput.textContent += chunk;
+  // Przewijamy tylko wtedy, gdy użytkownik i tak jest na dole — inaczej
+  // czytanie starszych linii byłoby niemożliwe przy aktywnym przebiegu.
+  if (atBottom) {
+    els.jobOutput.scrollTop = els.jobOutput.scrollHeight;
+  }
+}
+
+function renderProgress(progress) {
+  if (!els.jobProgress || !progress) return;
+
+  const parts = [];
+  if (progress.checked) parts.push(`sprawdzone: ${progress.checked}`);
+  if (progress.currentManuscriptId) parts.push(progress.currentManuscriptId);
+
+  const approve = progress.decisions?.APPROVE || 0;
+  const reject = progress.decisions?.REJECT || 0;
+  if (approve || reject) parts.push(`APPROVE ${approve} / REJECT ${reject}`);
+  if (progress.sent) parts.push(`wysłane: ${progress.sent}`);
+  if (progress.liveActions) {
+    parts.push(`akcje live: ${progress.liveActions}${progress.liveActionLimit ? `/${progress.liveActionLimit}` : ""}`);
+  }
+  if (progress.cacheHits) parts.push(`cache: ${progress.cacheHits}`);
+  if (progress.skipped) parts.push(`pominięte: ${progress.skipped}`);
+  if (progress.errors) parts.push(`błędy: ${progress.errors}`);
+  if (progress.tokenSummary) parts.push(progress.tokenSummary);
+
+  els.jobProgress.textContent = parts.join(" · ") || "—";
+  els.jobProgress.hidden = parts.length === 0;
 }
 
 function renderReports() {
@@ -464,6 +707,7 @@ function renderJob() {
     els.statusLine.textContent = "Ready";
     els.statusLine.dataset.tone = "neutral";
     els.jobOutput.textContent = "No active job.";
+    if (els.jobProgress) els.jobProgress.hidden = true;
     els.stopBtn.disabled = true;
     return;
   }
@@ -473,6 +717,7 @@ function renderJob() {
   els.statusLine.dataset.tone = job.status === "failed" ? "error" : "active";
   els.jobOutput.textContent = job.output || "Job started...";
   els.jobOutput.scrollTop = els.jobOutput.scrollHeight;
+  renderProgress(job.progress);
   els.stopBtn.disabled = !["running", "stopping"].includes(job.status);
 }
 

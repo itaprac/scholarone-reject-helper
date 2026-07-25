@@ -13,6 +13,7 @@
       </div>
       <div class="topbar-status">
         <p id="statusLine" role="status" aria-live="polite">Ready</p>
+        <p id="doctorLine" class="doctor-line" hidden></p>
         <button id="refreshBtn" type="button">Refresh</button>
       </div>
     </header>
@@ -216,6 +217,46 @@
             <span id="screeningSettingsStatus" role="status" aria-live="polite">Not saved</span>
           </div>
         </section>
+
+        <section class="band results-section">
+          <div class="section-title">
+            <div>
+              <h2>Assessment results</h2>
+              <p>Decyzje z zapisanych przebiegów — bez otwierania plików w <code>logs/screening/</code>.</p>
+            </div>
+            <button id="refreshScreeningRunsBtn" type="button">Refresh</button>
+          </div>
+
+          <div class="results-controls">
+            <label>Run
+              <select id="screeningRunSelect"></select>
+            </label>
+            <label>Decision
+              <select id="screeningDecisionFilter">
+                <option value="">All</option>
+                <option value="APPROVE">APPROVE</option>
+                <option value="REJECT">REJECT</option>
+                <option value="ERROR">Errors</option>
+              </select>
+            </label>
+            <strong id="screeningRunSummary" aria-live="polite">No run selected</strong>
+          </div>
+
+          <div class="table-wrap">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th scope="col">Manuscript</th>
+                  <th scope="col">Decision</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">Tokens</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody id="screeningResultsBody"></tbody>
+            </table>
+          </div>
+        </section>
       </div>
 
       <div id="reviewersPanel" role="tabpanel" aria-labelledby="reviewersTab" hidden>
@@ -298,6 +339,7 @@
           </div>
           <button id="stopBtn" type="button" disabled>Stop</button>
         </div>
+        <p id="jobProgress" class="job-progress" role="status" aria-live="polite" hidden>—</p>
         <pre id="jobOutput">No active job.</pre>
       </section>
     </main>

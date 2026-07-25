@@ -578,3 +578,64 @@ tr.report-row.selected .report-name {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Podsumowanie postępu nad strumieniem logu. */
+.job-progress {
+  margin: 0 0 8px;
+  font: 500 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted, #64748b);
+  word-break: break-word;
+}
+
+/* Wynik preflightu; widoczny tylko, gdy coś wymaga uwagi. */
+.doctor-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #b45309;
+}
+
+/* Tabela wyników oceny LLM. */
+.results-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+/* Stałe szerokości kolumn: bez nich długie tytuły artykułów rozpychały
+   pierwszą kolumnę i wypychały decyzję oraz uzasadnienie poza ekran. */
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  table-layout: fixed;
+}
+.results-table th:nth-child(1), .results-table td:nth-child(1) { width: 38%; }
+.results-table th:nth-child(2), .results-table td:nth-child(2) { width: 10%; }
+.results-table th:nth-child(3), .results-table td:nth-child(3) { width: 30%; }
+.results-table th:nth-child(4), .results-table td:nth-child(4) { width: 8%; }
+.results-table th:nth-child(5), .results-table td:nth-child(5) { width: 14%; }
+/* Globalne td ma white-space: nowrap — tu musi zawijać, bo uzasadnienia
+   decyzji potrafią mieć kilka zdań i nachodziłyby na sąsiednie kolumny. */
+.results-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  vertical-align: top;
+}
+.results-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+
+.results-table td[data-decision="REJECT"] { color: #b91c1c; font-weight: 600; }
+.results-table td[data-decision="APPROVE"] { color: #15803d; font-weight: 600; }
+.results-table td[data-decision="ERROR"] { color: #b45309; font-weight: 600; }
+
+.row-subtitle { display: block; color: var(--muted, #64748b); font-size: 13px; margin-top: 2px; }
+.row-abstract { margin: 6px 0 0; font-size: 13px; color: var(--muted, #64748b); max-width: 70ch; }
+.table-wrap { overflow-x: auto; }
