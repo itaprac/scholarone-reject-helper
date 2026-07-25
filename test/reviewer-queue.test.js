@@ -1,12 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  candidateAddConfirmationState,
   canRecoverReviewerContext,
+  createAccountBlockingReason,
   findMatchingSimilarAccount,
   isReviewerCandidateSkipped,
+  isReviewerManuscriptSkippedResult,
   isReviewerSearchDeferredResult,
   rememberDeferredReviewer,
+  reviewerArticleSkipReason,
   reviewerQueueLabels,
+  reviewerSelectionPolicy,
   reviewersPendingInvitation,
 } from "../src/select-reviewers.js";
 
@@ -14,6 +19,25 @@ test("combined reviewer mode drains Invite Reviewers before Select Reviewers", (
   assert.deepEqual(reviewerQueueLabels("combined"), ["Invite Reviewers", "Select Reviewers"]);
   assert.deepEqual(reviewerQueueLabels("invite"), ["Invite Reviewers"]);
   assert.deepEqual(reviewerQueueLabels("select"), ["Select Reviewers"]);
+});
+
+test("an unusual-activity alert skips reviewer handling before any invitation work", () => {
+  assert.equal(
+    reviewerArticleSkipReason("High rate of unusual activity on this document detected"),
+    "unusual_activity_alert"
+  );
+  assert.equal(reviewerArticleSkipReason("Reviewer List"), null);
+  assert.equal(isReviewerManuscriptSkippedResult({ status: "reviewer_manuscript_skipped" }), true);
+});
+
+test("a duplicate-people merge warning blocks this candidate instead of the batch", () => {
+  assert.equal(createAccountBlockingReason(`
+    Duplicate people in the system exist with this email address.
+    Please use the user administration/merge tools to fix the accounts before proceeding.
+  `), "duplicate_people_merge_required");
+  assert.equal(createAccountBlockingReason(
+    "A person with this e-mail address already exists in the system. Click Save and Add."
+  ), null);
 });
 
 test("recovery follows an exact manuscript only before invitations are sent", () => {
@@ -81,6 +105,52 @@ test("invitation verification includes reviewers selected before a deferred retr
   );
 });
 
+test("a revision invites its selected reviewers without adding new candidates", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R3", "Invite Reviewers", [
+    { name: "Previously Selected", status: "Selected" },
+    { name: "Prior Reviewer", status: "Agreed" },
+  ]), {
+    isRevision: true,
+    isInviteQueue: true,
+    addNewReviewers: false,
+    reason: "revision_reuses_existing_reviewers",
+  });
+});
+
+test("a revision may add candidates when a prior reviewer needs replacement", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R2", "Invite Reviewers", [
+    { name: "Previously Selected", status: "Selected" },
+    { name: "Prior Reviewer", status: "Declined" },
+  ]), {
+    isRevision: true,
+    isInviteQueue: true,
+    addNewReviewers: true,
+    reason: "revision_has_reviewer_needing_replacement",
+  });
+});
+
+test("an original submission still fills the configured reviewer target", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116", "Invite Reviewers", [
+    { name: "Previously Selected", status: "Selected" },
+  ]), {
+    isRevision: false,
+    isInviteQueue: true,
+    addNewReviewers: true,
+    reason: "original_submission_fills_reviewer_target",
+  });
+});
+
+test("the revision exception does not change the Select Reviewers queue", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R1", "Select Reviewers", [
+    { name: "Previously Selected", status: "Selected" },
+  ]), {
+    isRevision: true,
+    isInviteQueue: false,
+    addNewReviewers: true,
+    reason: "select_reviewers_queue_fills_target",
+  });
+});
+
 test("a reviewer with only mismatched similar accounts is skipped safely", () => {
   const candidate = { name: "Yi Zhou", email: "yi.zhou@ibm.com" };
   const similarAccounts = [
@@ -99,4 +169,36 @@ test("an exact email among similar accounts remains eligible", () => {
     { id: "xik_other", name: "Yi Zhou", email: "other@example.com" },
     exact,
   ]), exact);
+});
+
+test("a failed Add may be skipped only when the reviewer roster stayed unchanged", () => {
+  const before = [
+    { id: "reviewer-1", name: "Ganaa, Ernest", status: "Agreed" },
+    { id: "reviewer-2", name: "Amer, Ali", status: "Selected" },
+  ];
+  assert.deepEqual(candidateAddConfirmationState(before, [
+    { ...before[0], status: "Agreed" },
+    { ...before[1], history: "Selected: 13-Jul-2026" },
+  ]), {
+    rosterUnchanged: true,
+    beforeTotal: 2,
+    afterTotal: 2,
+    beforeCountTowardTarget: 2,
+    afterCountTowardTarget: 2,
+  });
+});
+
+test("an unrecognized roster change after Add remains a fatal ambiguity", () => {
+  const before = [
+    { id: "reviewer-1", name: "Ganaa, Ernest", status: "Agreed" },
+    { id: "reviewer-2", name: "Amer, Ali", status: "Selected" },
+  ];
+  const result = candidateAddConfirmationState(before, [
+    ...before,
+    { id: "reviewer-3", name: "Unexpected Account", status: "Selected" },
+  ]);
+  assert.equal(result.rosterUnchanged, false);
+  assert.equal(result.beforeTotal, 2);
+  assert.equal(result.afterTotal, 3);
+  assert.equal(result.afterCountTowardTarget, 3);
 });

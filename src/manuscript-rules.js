@@ -5,7 +5,7 @@ export function inspectManuscriptText(
   const manuscriptId = extractManuscriptId(bodyText);
   const submittedDate = extractSubmittedDate(bodyText);
   const hasUnusualActivity = /high\s+rate\s+of\s+unusual\s+activity/i.test(bodyText);
-  const isRevision = manuscriptId ? /\.R\d+$/i.test(manuscriptId) : false;
+  const isRevision = isRevisionManuscriptId(manuscriptId);
 
   if (!manuscriptId) {
     return {
@@ -76,6 +76,10 @@ export function extractManuscriptId(text) {
 
 export function normalizeManuscriptId(value) {
   return (value || "").toUpperCase().replace(/\s+/g, "").trim();
+}
+
+export function isRevisionManuscriptId(value) {
+  return /\.R\d+$/i.test(normalizeManuscriptId(value));
 }
 
 export function extractSubmittedDate(text) {

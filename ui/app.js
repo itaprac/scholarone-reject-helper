@@ -24,8 +24,10 @@ const REPORT_STATUS_LABELS = {
 
 const els = {
   rejectTab: document.getElementById("rejectTab"),
+  screeningTab: document.getElementById("screeningTab"),
   reviewersTab: document.getElementById("reviewersTab"),
   rejectPanel: document.getElementById("rejectPanel"),
+  screeningPanel: document.getElementById("screeningPanel"),
   reviewersPanel: document.getElementById("reviewersPanel"),
   statusLine: document.getElementById("statusLine"),
   refreshBtn: document.getElementById("refreshBtn"),
@@ -59,22 +61,44 @@ const els = {
   inviteReviewersBtn: document.getElementById("inviteReviewersBtn"),
   saveReviewerSettingsBtn: document.getElementById("saveReviewerSettingsBtn"),
   reviewerSettingsStatus: document.getElementById("reviewerSettingsStatus"),
+  screeningStartUrl: document.getElementById("screeningStartUrl"),
+  screeningScope: document.getElementById("screeningScope"),
+  screeningMaxChecked: document.getElementById("screeningMaxChecked"),
+  screeningSlowMo: document.getElementById("screeningSlowMo"),
+  assessmentModel: document.getElementById("assessmentModel"),
+  assessmentReasoningEffort: document.getElementById("assessmentReasoningEffort"),
+  assessmentTimeoutSeconds: document.getElementById("assessmentTimeoutSeconds"),
+  assessmentPrompt: document.getElementById("assessmentPrompt"),
+  screeningRejectMessage: document.getElementById("screeningRejectMessage"),
+  screeningDryRunBtn: document.getElementById("screeningDryRunBtn"),
+  screeningLiveRunBtn: document.getElementById("screeningLiveRunBtn"),
+  saveScreeningSettingsBtn: document.getElementById("saveScreeningSettingsBtn"),
+  screeningSettingsStatus: document.getElementById("screeningSettingsStatus"),
 };
 
 els.rejectTab.addEventListener("click", () => activateView("reject"));
+els.screeningTab.addEventListener("click", () => activateView("screening"));
 els.reviewersTab.addEventListener("click", () => activateView("reviewers"));
-for (const tab of [els.rejectTab, els.reviewersTab]) {
+const workflowTabs = [
+  { view: "reject", tab: els.rejectTab },
+  { view: "screening", tab: els.screeningTab },
+  { view: "reviewers", tab: els.reviewersTab },
+];
+for (const { view, tab } of workflowTabs) {
   tab.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
     event.preventDefault();
-    const nextView = state.activeView === "reject" ? "reviewers" : "reject";
-    activateView(nextView);
-    (nextView === "reviewers" ? els.reviewersTab : els.rejectTab).focus();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const index = workflowTabs.findIndex((item) => item.view === view);
+    const next = workflowTabs[(index + direction + workflowTabs.length) % workflowTabs.length];
+    activateView(next.view);
+    next.tab.focus();
   });
 }
 els.reviewerMaxManuscripts.addEventListener("input", renderReviewerBatchSummary);
 els.reviewersPerPaper.addEventListener("input", renderReviewerBatchSummary);
 els.reviewerQueue.addEventListener("change", renderReviewerBatchSummary);
+els.screeningScope.addEventListener("change", renderScreeningScope);
 bindAsyncClick(els.refreshBtn, refresh);
 bindAsyncClick(els.dryRunBtn, runDryRun);
 bindAsyncClick(els.liveRunBtn, runLiveSend);
@@ -85,6 +109,9 @@ bindAsyncClick(els.stopBtn, stopCurrentJob);
 bindAsyncClick(els.prepareReviewersBtn, runReviewerPreparation);
 bindAsyncClick(els.inviteReviewersBtn, runReviewerBatch);
 bindAsyncClick(els.saveReviewerSettingsBtn, saveReviewerSettings);
+bindAsyncClick(els.screeningDryRunBtn, runMetadataCollection);
+bindAsyncClick(els.screeningLiveRunBtn, runLiveAssessment);
+bindAsyncClick(els.saveScreeningSettingsBtn, saveScreeningSettings);
 
 refresh().catch(showError);
 
@@ -199,6 +226,38 @@ async function runReviewerBatch() {
   setJob(payload.job);
 }
 
+async function runMetadataCollection() {
+  if (!validateInputs(screeningInputs())) return;
+
+  const payload = await api("/api/run/screening/collect", {
+    method: "POST",
+    body: JSON.stringify(screeningOptions()),
+  });
+  setJob(payload.job);
+}
+
+async function runLiveAssessment() {
+  if (!validateInputs(screeningInputs())) return;
+
+  const scope = els.screeningScope.value === "all"
+    ? "całą kolejkę Complete Checklist"
+    : `maksymalnie ${valueOf(els.screeningMaxChecked)} manuskryptów`;
+  if (!confirmDangerousAction(
+    `Uruchomić LIVE dla ${scope}?\n\nAPPROVE i REJECT zostaną naprawdę wykonane w ScholarOne. Wiadomości Reject zostaną wysłane, a zatwierdzone prace zostaną przypisane do Wojciecha Sałabuna jako EIC i AE.`
+  )) {
+    return;
+  }
+
+  const payload = await api("/api/run/screening/live", {
+    method: "POST",
+    body: JSON.stringify({
+      ...screeningOptions(),
+      screeningLive: true,
+    }),
+  });
+  setJob(payload.job);
+}
+
 async function saveSettings() {
   const payload = await api("/api/settings", {
     method: "POST",
@@ -225,6 +284,15 @@ async function saveReviewerSettings() {
   });
   applyConfig(payload.config);
   els.reviewerSettingsStatus.textContent = `Saved to ${payload.config.settingsPath}`;
+}
+
+async function saveScreeningSettings() {
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settingsOptions()),
+  });
+  applyConfig(payload.config);
+  els.screeningSettingsStatus.textContent = `Saved to ${payload.config.settingsPath}`;
 }
 
 async function stopCurrentJob() {
@@ -415,17 +483,24 @@ function updateActionState() {
   els.sendReportBtn.disabled = jobRunning || !state.selectedReportPath;
   els.prepareReviewersBtn.disabled = jobRunning;
   els.inviteReviewersBtn.disabled = jobRunning;
+  els.screeningDryRunBtn.disabled = jobRunning;
+  els.screeningLiveRunBtn.disabled = jobRunning;
 }
 
 function activateView(view) {
   state.activeView = view;
-  const reviewersActive = view === "reviewers";
-  els.rejectPanel.hidden = reviewersActive;
-  els.reviewersPanel.hidden = !reviewersActive;
-  els.rejectTab.classList.toggle("selected", !reviewersActive);
-  els.reviewersTab.classList.toggle("selected", reviewersActive);
-  els.rejectTab.setAttribute("aria-selected", String(!reviewersActive));
-  els.reviewersTab.setAttribute("aria-selected", String(reviewersActive));
+  const views = [
+    { name: "reject", tab: els.rejectTab, panel: els.rejectPanel },
+    { name: "screening", tab: els.screeningTab, panel: els.screeningPanel },
+    { name: "reviewers", tab: els.reviewersTab, panel: els.reviewersPanel },
+  ];
+  for (const item of views) {
+    const active = item.name === view;
+    item.panel.hidden = !active;
+    item.tab.classList.toggle("selected", active);
+    item.tab.setAttribute("aria-selected", String(active));
+    item.tab.tabIndex = active ? 0 : -1;
+  }
 }
 
 function showError(error) {
@@ -475,12 +550,23 @@ function applyConfig(config) {
   setValue(els.reviewerSlowMo, config.reviewerSlowMo);
   setValue(els.reviewerRefreshWaitSeconds, config.reviewerRefreshWaitSeconds);
   els.reviewerKeepOpen.checked = Boolean(config.reviewerKeepOpen);
+  setValue(els.screeningStartUrl, config.screeningStartUrl);
+  setValue(els.screeningScope, config.screeningScanAll ? "all" : "limited");
+  setValue(els.screeningMaxChecked, config.screeningMaxChecked);
+  setValue(els.screeningSlowMo, config.screeningSlowMo);
+  setValue(els.assessmentModel, config.assessmentModel);
+  setValue(els.assessmentReasoningEffort, config.assessmentReasoningEffort);
+  setValue(els.assessmentTimeoutSeconds, config.assessmentTimeoutSeconds);
+  setValue(els.assessmentPrompt, config.assessmentPrompt);
+  setValue(els.screeningRejectMessage, config.screeningRejectMessage);
+  renderScreeningScope();
   renderReviewerBatchSummary();
   const settingsStatus = config.settingsSaved
     ? `Saved: ${config.settingsPath}`
     : "Loaded from .env/defaults";
   els.settingsStatus.textContent = settingsStatus;
   els.reviewerSettingsStatus.textContent = settingsStatus;
+  els.screeningSettingsStatus.textContent = settingsStatus;
 }
 
 function setValue(input, value) {
@@ -506,7 +592,53 @@ function settingsOptions() {
   return {
     ...formOptions(),
     ...reviewerOptions(),
+    ...screeningOptions(),
   };
+}
+
+function screeningInputs() {
+  const inputs = [
+    els.screeningStartUrl,
+    els.screeningSlowMo,
+    els.assessmentModel,
+    els.assessmentReasoningEffort,
+    els.assessmentTimeoutSeconds,
+    els.assessmentPrompt,
+    els.screeningRejectMessage,
+  ];
+  if (els.screeningScope.value === "limited") {
+    inputs.push(els.screeningMaxChecked);
+  }
+  return inputs;
+}
+
+function screeningOptions() {
+  return {
+    screeningStartUrl: valueOf(els.screeningStartUrl),
+    screeningMaxChecked: valueOf(els.screeningMaxChecked),
+    screeningScanAll: els.screeningScope.value === "all",
+    screeningSlowMo: valueOf(els.screeningSlowMo),
+    screeningKeepOpen: false,
+    assessmentModel: valueOf(els.assessmentModel),
+    assessmentReasoningEffort: els.assessmentReasoningEffort.value,
+    assessmentTimeoutSeconds: valueOf(els.assessmentTimeoutSeconds),
+    assessmentPrompt: valueOf(els.assessmentPrompt),
+    screeningRejectMessage: valueOf(els.screeningRejectMessage),
+  };
+}
+
+function renderScreeningScope() {
+  const scanAll = els.screeningScope.value === "all";
+  els.screeningMaxChecked.disabled = scanAll;
+  els.screeningDryRunBtn.textContent = scanAll
+    ? "Dry run entire queue"
+    : "Dry run limited batch";
+  els.screeningLiveRunBtn.textContent = scanAll
+    ? "Live entire queue"
+    : "Live limited batch";
+  els.screeningMaxChecked.title = scanAll
+    ? "Limit jest wyłączony podczas skanowania całej kolejki."
+    : "Maksymalna liczba manuskryptów sprawdzonych w tym przebiegu.";
 }
 
 function reviewerInputs() {

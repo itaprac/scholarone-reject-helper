@@ -4,7 +4,34 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { inspectManuscriptText, normalizeManuscriptId } from "./manuscript-rules.js";
+import { DEFAULT_SCREENING_REJECT_MESSAGE } from "./default-screening-reject-message.js";
+import { DEFAULT_ASSESSMENT_PROMPT } from "./default-assessment-prompt.js";
+import {
+  DEFAULT_ASSESSMENT_MODEL,
+  DEFAULT_ASSESSMENT_REASONING_EFFORT,
+} from "./assessment-config.js";
+import { deriveSimulatedContinuation, runCodexAssessment } from "./llm-assessment.js";
+import {
+  inspectManuscriptText,
+  isRevisionManuscriptId,
+  normalizeManuscriptId,
+} from "./manuscript-rules.js";
+import { buildScreeningBatchResult } from "./screening-batch.js";
+import { formatTokenUsage, screeningResultToCsv } from "./screening-report.js";
+import {
+  buildAutomaticRevisionAssessment,
+  classifyScreeningManuscript,
+} from "./screening-assessment.js";
+import {
+  hasUnusualActivityAlert,
+  openAndReadAbstract,
+  readManuscriptSummary,
+  waitForManuscriptMetadataReady,
+} from "./screening-metadata.js";
+import {
+  approveAndAssignEditors,
+  DEFAULT_EDITOR_NAME,
+} from "./screening-approval.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -52,6 +79,28 @@ const config = {
   rejectIds: parseIdList(args["reject-ids"] || env.REJECT_IDS || ""),
   rejectProgressFile: args["reject-progress-file"] || env.REJECT_PROGRESS_FILE || "",
   requireTargets: parseBool(args["require-targets"] ?? env.REQUIRE_TARGETS, false),
+  collectMetadata: args["collect-metadata"] === true,
+  scanAllMetadata: parseBool(
+    args["scan-all-metadata"] ?? env.SCAN_ALL_METADATA,
+    false
+  ),
+  assessWithLlm: args["assess-with-llm"] === true,
+  applyAssessmentDecisions: args["apply-assessment-decisions"] === true,
+  assessmentModel:
+    args["assessment-model"] ||
+    env.ASSESSMENT_MODEL ||
+    DEFAULT_ASSESSMENT_MODEL,
+  assessmentReasoningEffort:
+    args["assessment-reasoning-effort"] ||
+    env.ASSESSMENT_REASONING_EFFORT ||
+    DEFAULT_ASSESSMENT_REASONING_EFFORT,
+  assessmentTimeoutSeconds: toInteger(
+    args["assessment-timeout-seconds"] || env.ASSESSMENT_TIMEOUT_SECONDS,
+    120
+  ),
+  assessmentPrompt: loadAssessmentPrompt(args, env),
+  screeningEditorName: args["screening-editor-name"] || DEFAULT_EDITOR_NAME,
+  screeningRejectMessage: loadScreeningRejectMessage(args, env),
   rejectMessage: loadRejectMessage(args, env),
   profileDir: args["profile-dir"] || DEFAULTS.profileDir,
   logsDir: args["logs-dir"] || DEFAULTS.logsDir,
@@ -72,6 +121,10 @@ if (config.dryRun) {
 if (config.reportOnly) {
   config.clickReject = false;
   config.saveAndSend = false;
+}
+
+if (config.applyAssessmentDecisions && (!config.collectMetadata || !config.assessWithLlm)) {
+  throw new Error("--apply-assessment-decisions wymaga --collect-metadata i --assess-with-llm.");
 }
 
 const runId = new Date().toISOString().replace(/[:.]/g, "-");
@@ -108,6 +161,13 @@ try {
     rejectIdsCount: config.rejectIds.length,
     rejectProgressFile: config.rejectProgressFile || null,
     requireTargets: config.requireTargets,
+    collectMetadata: config.collectMetadata,
+    scanAllMetadata: config.scanAllMetadata,
+    assessWithLlm: config.assessWithLlm,
+    applyAssessmentDecisions: config.applyAssessmentDecisions,
+    assessmentModel: config.assessmentModel,
+    assessmentReasoningEffort: config.assessmentReasoningEffort,
+    assessmentTimeoutSeconds: config.assessmentTimeoutSeconds,
   });
 
   if (config.requireTargets && !config.rejectFromReport && config.rejectIds.length === 0) {
@@ -119,11 +179,20 @@ try {
   }
   await ensureLoggedIn(page, { reason: "startup" });
 
-  const result = config.rejectFromReport || config.rejectIds.length
-    ? await runRejectTargetsFromSearch(page)
-    : await runScan(page);
-  result.summary = buildRunSummary(result);
-  result.artifacts = await writeRunArtifacts(result);
+  const result = config.collectMetadata
+    ? await runMetadataCollection(page)
+    : config.rejectFromReport || config.rejectIds.length
+      ? await runRejectTargetsFromSearch(page)
+      : await runScan(page);
+
+  if (config.collectMetadata) {
+    result.artifact = await writeMetadataArtifact(result);
+    console.log(`[TOKEN SUMMARY] ${formatTokenUsage(result.summary?.tokenUsage)}`);
+    console.log(`[SCREENING CSV] ${result.summaryCsv}`);
+  } else {
+    result.summary = buildRunSummary(result);
+    result.artifacts = await writeRunArtifacts(result);
+  }
 
   await logEvent("run_finished", result);
   console.log(JSON.stringify(result, null, 2));
@@ -147,6 +216,306 @@ try {
   }
 
   await browserSession.close();
+}
+
+async function runMetadataCollection(page) {
+  let checked = 0;
+  let hasOpenDetailsPage = false;
+  let queueExhausted = false;
+  const seenManuscriptIds = new Set();
+  const skippedUnusualActivity = [];
+  const manuscripts = [];
+  let stoppedAfterActionError = false;
+
+  while (config.scanAllMetadata || checked < config.maxChecked) {
+    if (!hasOpenDetailsPage) {
+      await ensureManuscriptListReady(page);
+      const opened = await openNextUnseenViewDetailsAcrossQueuePages(page, seenManuscriptIds);
+      if (!opened) {
+        queueExhausted = true;
+        break;
+      }
+
+      const detailsReady = await waitForDetailsPageOrRelogin(page, "metadata-open-details");
+      if (!detailsReady) {
+        continue;
+      }
+      hasOpenDetailsPage = true;
+    }
+
+    await waitForManuscriptMetadataReady(page);
+    const bodyText = await page.locator("body").innerText();
+    const inspected = await inspectCurrentManuscript(page);
+    const manuscriptId = normalizeManuscriptId(inspected.manuscriptId);
+
+    if (manuscriptId && seenManuscriptIds.has(manuscriptId)) {
+      const movedNext = await goToNextDocument(page);
+      if (!movedNext) {
+        await returnToList(page);
+        hasOpenDetailsPage = false;
+      }
+      continue;
+    }
+
+    checked += 1;
+    if (manuscriptId) {
+      seenManuscriptIds.add(manuscriptId);
+    }
+
+    const screeningRule = classifyScreeningManuscript(manuscriptId, {
+      hasUnusualActivity: hasUnusualActivityAlert(bodyText),
+    });
+    if (screeningRule === "skip-unusual-activity") {
+      const skipped = {
+        manuscriptId: manuscriptId || null,
+        reason: "High rate of unusual activity",
+      };
+      skippedUnusualActivity.push(skipped);
+      await logEvent("metadata_manuscript_skipped", {
+        checked,
+        ...skipped,
+      });
+      console.log(`[${checked}] ${manuscriptId || "NO_ID"} -> pominięty: czerwony alert unusual activity`);
+
+      if (!config.scanAllMetadata && checked >= config.maxChecked) {
+        break;
+      }
+
+      const movedNext = await goToNextDocument(page);
+      if (!movedNext) {
+        await returnToList(page);
+        hasOpenDetailsPage = false;
+      }
+      continue;
+    }
+
+    const summary = await readManuscriptSummary(page);
+    if (!summary.manuscriptId || !summary.title) {
+      throw new Error(summary.reason || "Nie udało się odczytać tytułu manuskryptu.");
+    }
+
+    console.log(`[${checked}] ${summary.manuscriptId} -> tytuł: ${summary.title}`);
+    const isRevision = isRevisionManuscriptId(summary.manuscriptId);
+    const abstract = isRevision ? "" : await openAndReadAbstract(page);
+    const metadata = {
+      manuscriptId: summary.manuscriptId,
+      title: summary.title,
+      abstract,
+    };
+    const screenshot = await saveScreenshot(page, `metadata-${summary.manuscriptId}`);
+
+    await logEvent("metadata_collected", {
+      checked,
+      manuscriptId: summary.manuscriptId,
+      title: summary.title,
+      abstractLength: abstract.length,
+      screenshot,
+    });
+
+    let assessment = null;
+    let continuation = null;
+    let assessmentError = null;
+    let decisionAction = null;
+    let actionError = null;
+    if (isRevision) {
+      assessment = buildAutomaticRevisionAssessment(summary.manuscriptId);
+      continuation = deriveSimulatedContinuation(assessment.decision);
+      await logEvent("revision_automatically_approved", {
+        checked,
+        manuscriptId: summary.manuscriptId,
+        decision: assessment.decision,
+        mode: assessment.mode,
+        continuationAction: continuation.action,
+      });
+      console.log(`[AUTO APPROVE] ${summary.manuscriptId}: rewizja .R + liczba; pomijam abstrakt i LLM.`);
+      logAssessmentBranch(continuation);
+    } else if (config.assessWithLlm) {
+      const llmOutputPath = path.join(
+        config.logsDir,
+        "screening",
+        `${runId}-${summary.manuscriptId}-llm.json`
+      );
+      console.log(
+        `[LLM] Wysyłam tytuł i abstrakt do Codex CLI (${config.assessmentModel}, reasoning: ${config.assessmentReasoningEffort})...`
+      );
+      try {
+        assessment = await runCodexAssessment(metadata, {
+          instructions: config.assessmentPrompt,
+          model: config.assessmentModel,
+          reasoningEffort: config.assessmentReasoningEffort,
+          timeoutMs: config.assessmentTimeoutSeconds * 1000,
+          outputPath: llmOutputPath,
+          cwd: projectRoot,
+        });
+        continuation = deriveSimulatedContinuation(assessment.decision);
+
+        await logEvent("llm_assessment_completed", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          provider: assessment.provider,
+          model: assessment.model,
+          reasoningEffort: assessment.reasoningEffort,
+          mode: assessment.mode,
+          decision: assessment.decision,
+          reason: assessment.reason,
+          durationMs: assessment.durationMs,
+          usage: assessment.usage,
+          threadId: assessment.threadId,
+          eventCount: assessment.eventCount,
+          continuationAction: continuation.action,
+          llmOutputPath,
+          llmEventsPath: assessment.eventsPath,
+        });
+        console.log(`[LLM RESULT] ${assessment.decision}: ${assessment.reason}`);
+        console.log(`[LLM USAGE] ${formatSingleAssessmentUsage(assessment.usage)}, czas=${assessment.durationMs} ms`);
+        logAssessmentBranch(continuation);
+      } catch (error) {
+        assessmentError = {
+          message: error.message,
+          outputPath: llmOutputPath,
+          eventsPath: error.eventsPath || null,
+        };
+        await logEvent("llm_assessment_failed", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          message: error.message,
+          llmOutputPath,
+          llmEventsPath: error.eventsPath || null,
+        });
+        console.error(`[LLM ERROR] ${summary.manuscriptId}: ${error.message}`);
+      }
+    }
+
+    if (config.applyAssessmentDecisions && assessment && !assessmentError) {
+      console.log(`[LIVE ACTION] ${summary.manuscriptId}: wykonuję ${assessment.decision} w ScholarOne...`);
+      try {
+        decisionAction = await applyLiveAssessmentDecision(page, assessment);
+        decisionAction.screenshot = await saveScreenshot(
+          page,
+          `live-action-complete-${assessment.decision.toLowerCase()}-${summary.manuscriptId}`
+        );
+        await logEvent("assessment_live_action_completed", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          decision: assessment.decision,
+          decisionAction,
+        });
+        console.log(`[LIVE ACTION COMPLETE] ${summary.manuscriptId}: ${assessment.decision}.`);
+      } catch (error) {
+        const actionScreenshot = await saveScreenshot(page, `live-action-error-${summary.manuscriptId}`);
+        actionError = {
+          decision: assessment.decision,
+          message: error.message,
+          pageUrl: page.url(),
+          screenshot: actionScreenshot,
+        };
+        stoppedAfterActionError = true;
+        await logEvent("assessment_live_action_failed", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          ...actionError,
+        });
+        console.error(`[LIVE ACTION ERROR] ${summary.manuscriptId}: ${error.message}`);
+      }
+    }
+
+    manuscripts.push({
+      metadata,
+      assessment,
+      continuation,
+      assessmentError,
+      decisionAction,
+      actionError,
+      screenshot,
+    });
+
+    await logEvent("metadata_batch_progress", {
+      checked,
+      eligibleCount: manuscripts.length,
+      skippedUnusualActivityCount: skippedUnusualActivity.length,
+      latestManuscriptId: summary.manuscriptId,
+      liveActionCompleted: Boolean(decisionAction?.completed),
+      liveActionError: actionError?.message || null,
+    });
+
+    if (stoppedAfterActionError) {
+      break;
+    }
+
+    if (!config.scanAllMetadata && checked >= config.maxChecked) {
+      break;
+    }
+
+    if (config.applyAssessmentDecisions && decisionAction?.completed) {
+      await returnToList(page);
+      hasOpenDetailsPage = false;
+      continue;
+    }
+
+    const movedNext = await goToNextDocument(page);
+    if (!movedNext) {
+      await returnToList(page);
+      hasOpenDetailsPage = false;
+    }
+  }
+
+  return buildScreeningBatchResult({
+    checked,
+    skippedUnusualActivity,
+    manuscripts,
+    assessWithLlm: config.assessWithLlm,
+    applyAssessmentDecisions: config.applyAssessmentDecisions,
+    scanAll: config.scanAllMetadata,
+    maxChecked: config.maxChecked,
+    queueExhausted,
+  });
+}
+
+function logAssessmentBranch(continuation) {
+  const suffix = config.applyAssessmentDecisions
+    ? "tryb live: decyzja zostanie wykonana w ScholarOne"
+    : "dry run: bez kliknięcia w ScholarOne";
+  console.log(`[WORKFLOW BRANCH] ${continuation.action} (${suffix})`);
+}
+
+async function applyLiveAssessmentDecision(page, assessment) {
+  const checklistResult = await clickCompleteChecklist(page);
+
+  if (assessment.decision === "APPROVE") {
+    const approvalResult = await approveAndAssignEditors(page, {
+      editorName: config.screeningEditorName,
+      allowExistingAssignments: assessment.mode === "automatic-revision",
+    });
+    return {
+      completed: true,
+      decision: "APPROVE",
+      checklistResult,
+      approvalResult,
+    };
+  }
+
+  if (assessment.decision === "REJECT") {
+    const rejectResultWithPage = await clickRejectAndFillEmail(page, config.screeningRejectMessage);
+    const { emailPage, ...rejectResult } = rejectResultWithPage;
+    if (!rejectResult.clicked || !rejectResult.emailBodyFilled || !emailPage) {
+      throw new Error(rejectResult.note || "Nie udało się otworzyć i uzupełnić wiadomości Reject.");
+    }
+
+    const saveAndSendResult = await clickSaveAndSend(emailPage, page);
+    if (!saveAndSendResult.sent) {
+      throw new Error(saveAndSendResult.note || "Save and Send nie potwierdził wysłania decyzji Reject.");
+    }
+
+    return {
+      completed: true,
+      decision: "REJECT",
+      checklistResult,
+      rejectResult,
+      saveAndSendResult,
+    };
+  }
+
+  throw new Error(`Nieobsługiwana decyzja live: ${assessment.decision}`);
 }
 
 async function createBrowserSession() {
@@ -1613,7 +1982,9 @@ async function openNextUnseenViewDetails(page, seenManuscriptIds) {
 
 async function openNextUnseenViewDetailsAcrossQueuePages(page, seenManuscriptIds) {
   const visitedQueuePages = new Set();
-  const maxQueuePageHops = Math.max(3, Math.ceil(config.maxChecked / 10) + 5);
+  const maxQueuePageHops = config.scanAllMetadata
+    ? 500
+    : Math.max(3, Math.ceil(config.maxChecked / 10) + 5);
 
   for (let hop = 0; hop < maxQueuePageHops; hop += 1) {
     const pageInfo = await readQueuePageInfo(page);
@@ -2130,7 +2501,7 @@ async function countRejectControls(page) {
   }).catch(() => 0);
 }
 
-async function clickRejectAndFillEmail(page) {
+async function clickRejectAndFillEmail(page, message = config.rejectMessage) {
   const existingPages = new Set(page.context().pages());
   const newPagePromise = page.context().waitForEvent("page", { timeout: 25000 }).catch(() => null);
   const rejectSubmitResult = await submitRejectDecision(page);
@@ -2165,7 +2536,7 @@ async function clickRejectAndFillEmail(page) {
     };
   }
 
-  const emailResult = await fillRejectEmailBody(emailPage, config.rejectMessage);
+  const emailResult = await fillRejectEmailBody(emailPage, message);
 
   return {
     clicked: true,
@@ -3273,6 +3644,50 @@ async function writeRunArtifacts(result) {
   return artifacts;
 }
 
+async function writeMetadataArtifact(result) {
+  const screeningDir = path.join(config.logsDir, "screening");
+  const artifactPath = path.join(screeningDir, `${runId}.json`);
+  const summaryCsvPath = path.join(screeningDir, `${runId}-summary.csv`);
+  await fsp.mkdir(screeningDir, { recursive: true });
+  result.summaryCsv = summaryCsvPath;
+  result.artifact = artifactPath;
+  await fsp.writeFile(summaryCsvPath, screeningResultToCsv(result, runId), "utf8");
+  await fsp.writeFile(artifactPath, `${JSON.stringify({
+    runId,
+    createdAt: new Date().toISOString(),
+    config: {
+      startUrl: config.startUrl,
+      maxChecked: config.maxChecked,
+      headless: config.headless,
+      browserChannel: config.browserChannel || "playwright-chromium",
+      cdp: config.cdp || null,
+      slowMo: config.slowMo,
+      assessWithLlm: config.assessWithLlm,
+      scanAllMetadata: config.scanAllMetadata,
+      assessmentModel: config.assessmentModel,
+      assessmentReasoningEffort: config.assessmentReasoningEffort,
+      assessmentTimeoutSeconds: config.assessmentTimeoutSeconds,
+      assessmentPromptLength: config.assessmentPrompt.length,
+      applyAssessmentDecisions: config.applyAssessmentDecisions,
+      screeningEditorName: config.screeningEditorName,
+      screeningRejectMessageLength: config.screeningRejectMessage.length,
+    },
+    result,
+  }, null, 2)}\n`, "utf8");
+  return artifactPath;
+}
+
+function formatSingleAssessmentUsage(usage) {
+  if (!usage?.available) return "brak danych o tokenach";
+  return [
+    `input=${usage.inputTokens}`,
+    `cache=${usage.cachedInputTokens}`,
+    `output=${usage.outputTokens}`,
+    `reasoning=${usage.reasoningOutputTokens}`,
+    `razem=${usage.totalTokens}`,
+  ].join(", ");
+}
+
 function publicConfigSnapshot() {
   return {
     startUrl: config.startUrl,
@@ -3544,6 +3959,42 @@ function loadRejectMessage(parsedArgs, parsedEnv) {
   }
 
   return DEFAULT_REJECT_MESSAGE;
+}
+
+function loadScreeningRejectMessage(parsedArgs, parsedEnv) {
+  const messageFile = parsedArgs["screening-reject-message-file"] ||
+    parsedEnv.SCREENING_REJECT_MESSAGE_FILE || "";
+  if (messageFile) {
+    const absolutePath = path.isAbsolute(messageFile)
+      ? messageFile
+      : path.join(projectRoot, messageFile);
+    return fs.readFileSync(absolutePath, "utf8").trimEnd();
+  }
+
+  const inlineMessage = parsedArgs["screening-reject-message"] ||
+    parsedEnv.SCREENING_REJECT_MESSAGE || "";
+  if (inlineMessage) {
+    return inlineMessage.replace(/\\n/g, "\n").trimEnd();
+  }
+
+  return DEFAULT_SCREENING_REJECT_MESSAGE;
+}
+
+function loadAssessmentPrompt(parsedArgs, parsedEnv) {
+  const promptFile = parsedArgs["assessment-prompt-file"] || parsedEnv.ASSESSMENT_PROMPT_FILE || "";
+  if (promptFile) {
+    const absolutePath = path.isAbsolute(promptFile)
+      ? promptFile
+      : path.join(projectRoot, promptFile);
+    return fs.readFileSync(absolutePath, "utf8").trim();
+  }
+
+  const inlinePrompt = parsedArgs["assessment-prompt"] || parsedEnv.ASSESSMENT_PROMPT || "";
+  if (inlinePrompt) {
+    return inlinePrompt.replace(/\\n/g, "\n").trim();
+  }
+
+  return DEFAULT_ASSESSMENT_PROMPT;
 }
 
 function toInteger(value, fallback) {

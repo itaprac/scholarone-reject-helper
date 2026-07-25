@@ -19,6 +19,7 @@
 
     <nav class="mode-tabs" role="tablist" aria-label="Workflow">
       <button id="rejectTab" class="mode-tab selected" type="button" role="tab" aria-selected="true" aria-controls="rejectPanel">Auto-reject</button>
+      <button id="screeningTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="screeningPanel">Initial assessment</button>
       <button id="reviewersTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewersPanel">Reviewers</button>
     </nav>
 
@@ -128,6 +129,93 @@
           <button id="resetSettingsBtn" type="button">Reset saved settings</button>
         </div>
       </section>
+      </div>
+
+      <div id="screeningPanel" role="tabpanel" aria-labelledby="screeningTab" hidden>
+        <section class="band run-section screening-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Assessment workflow, stage 2</p>
+              <h2>Collect metadata and assess manuscripts</h2>
+              <p class="section-copy">Scan the Complete Checklist queue, collect every eligible title and abstract, assess each paper with Codex CLI, and save one batch JSON.</p>
+            </div>
+          </div>
+
+          <div class="form-grid screening-core-settings">
+            <label>
+              Scan scope
+              <select id="screeningScope">
+                <option value="all" selected>Entire queue</option>
+                <option value="limited">Use safety limit</option>
+              </select>
+            </label>
+            <label>
+              Safety limit
+              <input id="screeningMaxChecked" type="number" min="1" max="100" value="10">
+            </label>
+            <label>
+              Codex model
+              <input id="assessmentModel" type="text" value="gpt-5.6-terra" required>
+            </label>
+            <label>
+              Reasoning effort
+              <select id="assessmentReasoningEffort">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="operation-strip" aria-live="polite">
+            <div>
+              <span class="selection-label">Execution mode</span>
+              <strong>Dry run records results; live run submits decisions</strong>
+            </div>
+            <span class="operation-note">Live APPROVE completes both checklist items and assigns Wojciech Sałabun as EIC and AE. Live REJECT sends the configured rejection email.</span>
+          </div>
+
+          <label class="assessment-prompt-label">
+            Assessment rules
+            <textarea id="assessmentPrompt" rows="16" required spellcheck="true"></textarea>
+            <span>Edit the complete assessment prompt here and save it with “Save assessment settings”. The helper appends the manuscript title, abstract, and strict JSON output contract.</span>
+          </label>
+
+          <label class="assessment-prompt-label">
+            Live rejection email
+            <textarea id="screeningRejectMessage" rows="10" required spellcheck="true"></textarea>
+            <span>This message is used only by Initial assessment → Live REJECT. It does not change the older Auto-reject template.</span>
+          </label>
+
+          <details class="advanced-settings">
+            <summary>Advanced assessment settings</summary>
+            <div class="form-grid">
+              <label class="wide">
+                Start URL
+                <input id="screeningStartUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+              </label>
+              <label>
+                Slow ms
+                <input id="screeningSlowMo" type="number" min="0" value="500">
+              </label>
+              <label>
+                LLM timeout (seconds)
+                <input id="assessmentTimeoutSeconds" type="number" min="10" max="600" value="120">
+              </label>
+            </div>
+          </details>
+
+          <div class="actions run-actions">
+            <button id="screeningDryRunBtn" type="button" class="primary">Run assessment dry run</button>
+            <button id="screeningLiveRunBtn" type="button" class="danger">Run live decisions</button>
+          </div>
+          <p class="action-help">Both modes save one batch JSON in <code>logs/screening/</code>. Live mode performs externally consequential ScholarOne actions and stops on the first unconfirmed step.</p>
+
+          <div class="actions reviewer-settings-actions">
+            <button id="saveScreeningSettingsBtn" type="button">Save assessment settings</button>
+            <span id="screeningSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
       </div>
 
       <div id="reviewersPanel" role="tabpanel" aria-labelledby="reviewersTab" hidden>

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plan refaktoru — scholarone-reject-helper</title>
+<style>
+  body {
+    background: #000;
+    color: #ddd;
+    font: 16px/1.6 -apple-system, system-ui, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 40px 20px 80px;
+  }
+  h1 { font-size: 26px; margin: 0 0 8px; color: #fff; }
+  h2 {
+    font-size: 19px;
+    color: #fff;
+    margin: 40px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #333;
+  }
+  h3 { font-size: 16px; color: #eee; margin: 22px 0 6px; }
+  p { margin: 0 0 10px; }
+  ul { margin: 0 0 10px; padding-left: 22px; }
+  li { margin-bottom: 5px; }
+  code { font-family: ui-monospace, Menlo, monospace; font-size: 14px; color: #9cd; }
+  .muted { color: #888; }
+  .why { color: #999; }
+  hr { border: none; border-top: 1px solid #333; margin: 40px 0; }
+</style>
+</head>
+<body>
+
+<h1>Plan refaktoru i optymalizacji</h1>
+<p class="muted">scholarone-reject-helper · 2026-07-25 · stan: 90 testów (85 pass, 3 skip, 2 todo)</p>
+
+<h2>Diagnoza</h2>
+<ul>
+  <li><code>auto-reject.js</code> — 4033 linie, <strong>0 testów</strong> (kod wykonuje się przy imporcie, więc nie da się go testować)</li>
+  <li><code>select-reviewers.js</code> — 2378 linii, drugi monolit</li>
+  <li><strong>16 funkcji zduplikowanych 1:1</strong> między tymi plikami (login, parseArgs, env, klikanie po tekście, screenshoty)</li>
+  <li><code>logs/</code> — 405 MB, w tym 391 MB screenshotów, zero retencji</li>
+  <li>3 testy skipowane, bo czytają snapshoty z <code>/Users/itaprac/Downloads</code></li>
+  <li>Dodanie jednej opcji = edycja 7 miejsc (job-args, run-options, publicConfig, saveUiSettings, config, index.html, app.js)</li>
+  <li>28× <code>waitForTimeout()</code> i ~45 magicznych timeoutów bez wspólnego źródła</li>
+  <li><code>assessment-batch-output.schema.json</code> istnieje, ale nie jest nigdzie importowany</li>
+  <li>Ocena LLM: jeden podproces <code>codex exec</code> na artykuł, sekwencyjnie</li>
+  <li>UI pobiera cały output joba (do 120 KB) co 1,5 s</li>
+</ul>
+
+<hr>
+
+<h2>1. Higiena <span class="muted">— ~3 h, zero ryzyka</span></h2>
+
+<h3>Retencja logów</h3>
+<p>Screenshot tylko przy błędzie (dziś 19 wywołań w auto-reject, też na ścieżkach sukcesu). Pełne zrzuty za flagą <code>--debug-screenshots</code>. Do tego <code>npm run logs:prune</code>.</p>
+<p class="why">Odzyskane ~390 MB i szybsze runy — każdy screenshot to realne I/O.</p>
+
+<h3>Snapshoty HTML do repo</h3>
+<p>Przenieś z <code>~/Downloads</code> do <code>test/fixtures/</code> i zacommituj (usuwając wcześniej dane osobowe recenzentów — to strony z nazwiskami i mailami).</p>
+<p class="why">88/88 testów zamiast 85/90, suite działa na każdej maszynie.</p>
+
+<h3>Jedno źródło domyślnych</h3>
+<p><code>src/config/defaults.js</code>. Dziś URL czasopisma jest w 4 plikach, a liczby 50/30/500/10 powtarzają się w trzech plikach JS i w atrybutach <code>value=</code> w HTML.</p>
+
+<h3>Tooling</h3>
+<p><code>engines: node &gt;=20</code>, ESLint + Prettier, <code>npm run check</code> = lint + test.</p>
+
+<hr>
+
+<h2>2. Wspólny rdzeń Playwright <span class="muted">— ~8 h, największy zysk</span></h2>
+
+<h3>Wyciągnij 16 duplikatów do <code>src/core/</code></h3>
+<p>Zdublowane 1:1: <code>parseArgs</code>, <code>loadEnvFile</code>, <code>loadLoginCredentials</code>, <code>parseBool</code>, <code>createBrowserSession</code>, <code>ensureLoggedIn</code>, <code>isLoginPage</code>, <code>readLoginFailureText</code>, <code>clickTextControl</code>, <code>hasVisibleTextControl</code>, <code>activateLinkByText</code>, <code>submitScholarOneLinkByText</code>, <code>openManageMenu</code>, <code>ensureHeaderSearchReady</code>, <code>saveScreenshot</code>, <code>waitUntilInterrupted</code>.</p>
+<p>Podział: <code>browser.js</code>, <code>session.js</code>, <code>login.js</code>, <code>dom.js</code>, <code>navigation.js</code>, <code>args.js</code>, <code>logger.js</code>, <code>timeouts.js</code>.</p>
+<p class="why">Szacunkowo −800 do −1200 linii. Dziś każda poprawka w logowaniu musi być zrobiona dwa razy — a jak zrobisz raz, tryby cicho się rozjeżdżają.</p>
+
+<h3>Selektory do modułów</h3>
+<p><code>reviewer-selectors.js</code> to dobry wzorzec (zamrożona mapa + testy offline), ale <code>auto-reject.js</code> ma 27 selektorów inline, a <code>select-reviewers.js</code> mimo modułu dalej 38. Rozszerz wzorzec na całość.</p>
+
+<h3>Koniec ze sztywnymi pauzami</h3>
+<p>28× <code>waitForTimeout()</code> → czekanie na warunek (widoczny element, zmiana licznika, zakończona nawigacja). Zostaw tylko tam, gdzie ScholarOne nie daje żadnego sygnału.</p>
+<p class="why">Krótsze runy i mniej flaków naraz — to usunięcie zgadywania, nie kompromis.</p>
+
+<hr>
+
+<h2>3. Rozbicie <code>auto-reject.js</code> <span class="muted">— ~10 h, krytyczne</span></h2>
+
+<h3>Oddziel entry point od logiki</h3>
+<p>Cały blok top-level (parsowanie argów, <code>createBrowserSession()</code>, try/catch/finally) → cienki <code>bin/scholarone.js</code>. Workflow stają się funkcjami <code>runX(page, config)</code>, które nic nie robią przy imporcie.</p>
+
+<h3>Podział</h3>
+<ul>
+  <li><code>src/workflows/</code> — reject-scan, reject-from-report, screening, reviewers</li>
+  <li><code>src/steps/</code> — checklist, reject-email, queue</li>
+  <li><code>src/reporting/</code> — report, csv, artifacts</li>
+</ul>
+<p>Cel: żaden plik powyżej ~500 linii. Moduły reguł zostają bez zmian.</p>
+
+<h3>Testy ścieżki odrzucania</h3>
+<p>Najgroźniejsza operacja w projekcie (wysyłka maila „Save and Send") nie ma dziś ani jednego testu. Dopisz offline: rozpoznanie checklisty, znalezienie kontrolki reject, wypełnienie maila, rozpoznanie <em>potwierdzenia</em> wysyłki (nie samego zamknięcia popupu), limit <code>--max-rejected</code>.</p>
+<p class="why"><strong>Te testy napisz PRZED etapem 2</strong> — mają być siatką bezpieczeństwa dla deduplikacji, nie jej efektem ubocznym.</p>
+
+<hr>
+
+<h2>4. Jedna warstwa opcji <span class="muted">— ~6 h</span></h2>
+
+<h3>Deklaratywna tabela opcji</h3>
+<p><code>src/config/options.js</code>: nazwa, flaga CLI, klucz env, typ, min/max, domyślna, tryby, etykieta dla UI. Z niej generuje się parser CLI, walidator, budowanie argów joba, <code>publicConfig()</code>, zapis ustawień i pola formularza.</p>
+<p class="why">Nowa opcja = jeden wpis zamiast siedmiu. Znika klasa błędów, gdzie walidacja UI rozjeżdża się z parsowaniem w CLI.</p>
+
+<h3>Komendy zamiast kombinacji flag</h3>
+<p>Dziś tryb wynika z <code>--collect-metadata --assess-with-llm --scan-all-metadata --apply-assessment-decisions</code>; jest nawet guard rzucający wyjątkiem przy złej kombinacji. Zamiast tego:</p>
+<ul>
+  <li><code>scholarone reject --dry-run | --send [--from-report=…]</code></li>
+  <li><code>scholarone screen --dry-run | --live</code></li>
+  <li><code>scholarone reviewers --prepare | --invite</code></li>
+  <li><code>scholarone doctor</code> — preflight</li>
+</ul>
+<p>Stare skrypty npm zostają jako aliasy.</p>
+
+<h3><code>doctor</code></h3>
+<p>Sprawdza Node, Chromium, <code>codex login status</code>, <code>.env</code>, miejsce na dysku. Dziś dowiadujesz się o wylogowanym Codexie po 10 minutach klikania.</p>
+
+<hr>
+
+<h2>5. UI <span class="muted">— ~10 h</span></h2>
+
+<h3>Strumień zamiast pollingu</h3>
+<p>SSE albo <code>?since=offset</code> zamiast pobierania całych 120 KB co 1,5 s i przerysowywania <code>&lt;pre&gt;</code> od zera (scroll skacze). Procesy potomne emitują NDJSON obok czytelnego logu.</p>
+
+<h3>Realny postęp</h3>
+<p>Pasek 12/40, aktualny manuscript ID, decyzje na żywo, licznik APPROVE/REJECT/błędów, tokeny narastająco.</p>
+
+<h3>Wyniki screeningu w UI</h3>
+<p>Dziś zakładka potrafi odpalić run, ale nie pokazać wyników — są tylko w <code>logs/screening/*-summary.csv</code>. Dodaj tabelę + przycisk „wykonaj decyzje z tego przebiegu" (ten sam wzorzec co dry-run → reject z raportu).</p>
+
+<h3>Historia jobów</h3>
+<p><code>jobs</code> to <code>Map</code> w pamięci — restart UI kasuje historię. Zapis do <code>logs/jobs/&lt;id&gt;.json</code> + link job → raport.</p>
+
+<h3>Odchudzenie frontu</h3>
+<p><code>app.js</code> ma 692 linie i ręczną mapę 60+ elementów. Formularze renderowane z definicji opcji z etapu 4; jedna <code>readForm(mode)</code> zamiast sześciu funkcji <code>*Options()</code>; toasty zamiast <code>alert()</code>.</p>
+
+<hr>
+
+<h2>6. Wydajność i koszt LLM <span class="muted">— ~8 h</span></h2>
+
+<h3>Rozdziel zbieranie od oceniania</h3>
+<p>Dziś: otwórz artykuł → skopiuj abstrakt → <em>czekaj na LLM</em> → następny. Dwa najwolniejsze zasoby stoją na przemian bezczynnie. Zamiast tego producent (przeglądarka) + pula 3–4 równoległych ocen połączone kolejką.</p>
+<p class="why">Czas runu spada do wolniejszego z etapów zamiast ich sumy.</p>
+
+<h3>Ocena wsadowa</h3>
+<p>Schemat batch już jest w repo i nie jest używany. N manuskryptów w jednym wywołaniu, dopasowanie wyników po manuscript ID, fallback na tryb pojedynczy. Prompt z regułami płacony raz na paczkę, nie raz na artykuł.</p>
+
+<h3>Cache ocen</h3>
+<p>Klucz: hash z <code>manuscriptId + tytuł + abstrakt + prompt + model + reasoning effort</code>. Flaga <code>--no-cache</code> wymusza świeżą ocenę.</p>
+<p class="why">Iterowanie nad promptem przestaje kosztować pełną stawkę przy każdej próbie.</p>
+
+<h3>Odetnij ocenę od CLI</h3>
+<p><code>llm-assessment.js</code> jest zrośnięty z <code>codex exec</code> (flagi, parsowanie JSONL, <code>--output-last-message</code>, zliczanie tokenów ze zdarzeń). Wprowadź interfejs <code>assess(manuscripts, options)</code> z adapterami — obecny CLI plus opcjonalnie API po HTTP.</p>
+
+<h3>Decyzja: prompt-evals</h3>
+<p><code>scripts/evaluate-assessment-prompts.js</code> + 1,7 MB w <code>logs/prompt-evals/</code> to porzucona gałąź bez dokumentacji i bez wejścia z UI. Albo dociągnąć (zestaw referencyjny, raport dokładności), albo usunąć. Zostawienie jak jest to dług, który będzie mylił za pół roku.</p>
+
+<hr>
+
+<h2>7. Niezawodność <span class="muted">— ~5 h</span></h2>
+
+<h3>Wznawianie dla screeningu live</h3>
+<p><code>reject-from-report</code> ma <code>*.progress.json</code> i pomija obsłużone manuskrypty. Screening live nie ma nic równoważnego — przy ponownym odpaleniu ryzykujesz powtórzenie akcji. Zapis stanu per ID <em>przed</em> akcją, domknięcie po potwierdzeniu.</p>
+
+<h3>Bezpiecznik na każdy tryb live</h3>
+<p><code>--max-rejected</code> chroni auto-reject; screening live i zaproszenia nie mają odpowiednika, a <code>--scan-all-metadata</code> puszcza całą kolejkę.</p>
+
+<h3>Dziennik akcji</h3>
+<p><code>logs/actions.jsonl</code> — czas, tryb, ID, akcja, wynik. Osobno od logów debugowych, więc nie podlega czyszczeniu z etapu 1. Odpowiada na „czy ten artykuł już dostał maila?" bez przekopywania 405 MB.</p>
+
+<h3>Rozbicie README</h3>
+<p>~300 linii mieszających instalację, trzy workflow i referencję flag; przykłady zdążyły się rozjechać ze skryptami npm. README = instalacja + pierwszy run + mapa trybów, reszta do <code>docs/</code>, a referencja flag generowana z definicji opcji z etapu 4.</p>
+
+<hr>
+
+<h2>Kolejność</h2>
+<ol>
+  <li>Etap 1 w całości — fixture'y są warunkiem wstępnym dla testów w 2 i 3</li>
+  <li>Etap 3: oddziel entry point + napisz testy odrzucania <strong>przed</strong> deduplikacją</li>
+  <li>Etap 2 — wspólny rdzeń</li>
+  <li>Reszta etapu 3 — podział na workflow, już na wspólnym rdzeniu</li>
+  <li>Etap 4 — warstwa opcji</li>
+  <li>Etap 6.1 i 6.3 (pipeline + cache) — niezależne, można wcisnąć wcześniej jeśli screening uwiera</li>
+  <li>Etap 5 — UI</li>
+  <li>Etap 7 — niezawodność i dokumentacja</li>
+</ol>
+
+<h2>Czego nie ruszać</h2>
+<ul>
+  <li><strong>Moduły reguł</strong> — <code>manuscript-rules</code>, <code>reviewer-rules</code>, <code>screening-assessment</code>, <code>screening-batch</code>. Czyste funkcje, dobrze pokryte. To wzorzec, do którego ma dojść reszta.</li>
+  <li><strong>Wzorzec <code>reviewer-selectors.js</code></strong> — rozszerzyć, nie zmieniać.</li>
+  <li><strong>Podwójne potwierdzenia przed live</strong> — wygląda nadmiarowo, dopóki nie wyśle się przypadkiem 40 maili.</li>
+  <li><strong>Weryfikacja skutku zamiast zamknięcia popupu</strong> — najlepszy fragment logiki reviewerów.</li>
+  <li><strong>UI na 127.0.0.1 + kontrola Origin.</strong></li>
+  <li><strong>Reguła <code>.R{n}</code> i separacja dry-run od live</strong> — rdzeń modelu bezpieczeństwa.</li>
+</ul>
+
+</body>
+</html>

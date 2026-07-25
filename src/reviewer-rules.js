@@ -87,6 +87,8 @@ export function classifyReviewerStatus(reviewer) {
     status = "unavailable";
   } else if (/\breject(?:ed)?\b/i.test(current)) {
     status = "reject";
+  } else if (/\baccount\s+removed\b/i.test(current)) {
+    status = "account-removed";
   } else if (!current && /\bauto[\s-]*declined\b/i.test(history)) {
     status = "auto-declined";
   } else if (!current && /\bdeclined\b/i.test(history)) {
@@ -118,6 +120,20 @@ export function reviewerCountsTowardTarget(reviewer) {
 
 export function countReviewersTowardTarget(reviewers) {
   return reviewers.filter(reviewerCountsTowardTarget).length;
+}
+
+export function reviewerNeedsReplacement(reviewer) {
+  const { status, overdue } = classifyReviewerStatus(reviewer);
+  if (["selected", "invite", "invited"].includes(status)) {
+    return false;
+  }
+  return overdue || [
+    "declined",
+    "auto-declined",
+    "unavailable",
+    "reject",
+    "account-removed",
+  ].includes(status);
 }
 
 export function selectUniqueCandidates(candidates, priorReviewers, limit) {

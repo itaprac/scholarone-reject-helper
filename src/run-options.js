@@ -1,3 +1,8 @@
+import {
+  ASSESSMENT_REASONING_EFFORTS,
+  DEFAULT_ASSESSMENT_REASONING_EFFORT,
+} from "./assessment-config.js";
+
 const MODE_FIELDS = {
   dryrun: [
     ["maxChecked", 1],
@@ -29,6 +34,11 @@ const MODE_FIELDS = {
     ["reviewerSlowMo", 0],
     ["reviewerRefreshWaitSeconds", 1],
   ],
+  screening: [
+    ["screeningMaxChecked", 1],
+    ["screeningSlowMo", 0],
+    ["assessmentTimeoutSeconds", 10],
+  ],
 };
 
 export function validateRunOptions(body, mode) {
@@ -37,7 +47,12 @@ export function validateRunOptions(body, mode) {
     throw badRequest(`Nieznany tryb uruchomienia: ${mode}`);
   }
 
-  validateStartUrl(mode.startsWith("reviewers-") ? body.reviewerStartUrl : body.startUrl);
+  const startUrl = mode.startsWith("reviewers-")
+    ? body.reviewerStartUrl
+    : mode === "screening"
+      ? body.screeningStartUrl
+      : body.startUrl;
+  validateStartUrl(startUrl);
 
   for (const [key, minimum] of fields) {
     validateOptionalInteger(body[key], key, minimum);
@@ -49,6 +64,21 @@ export function validateRunOptions(body, mode) {
     }
     if (mode === "reviewers-prepare" && Number(body.reviewerMaxManuscripts || 1) !== 1) {
       throw badRequest("Tryb przygotowania bez wysyłania obsługuje jeden manuskrypt na uruchomienie.");
+    }
+  }
+
+  if (mode === "screening") {
+    if (!String(body.assessmentPrompt || "").trim()) {
+      throw badRequest("Prompt oceny LLM nie może być pusty.");
+    }
+    const reasoningEffort = body.assessmentReasoningEffort || DEFAULT_ASSESSMENT_REASONING_EFFORT;
+    if (!ASSESSMENT_REASONING_EFFORTS.includes(reasoningEffort)) {
+      throw badRequest(
+        `assessmentReasoningEffort musi mieć wartość: ${ASSESSMENT_REASONING_EFFORTS.join(", ")}.`
+      );
+    }
+    if (body.screeningLive && !String(body.screeningRejectMessage || "").trim()) {
+      throw badRequest("Wiadomość Reject nie może być pusta w trybie live.");
     }
   }
 }

@@ -5,6 +5,7 @@ import {
   countReviewersTowardTarget,
   normalizeName,
   parseListRange,
+  reviewerNeedsReplacement,
   samePerson,
   selectUniqueCandidates,
 } from "../src/reviewer-rules.js";
@@ -71,6 +72,25 @@ test("counts ScholarOne selections stored only in History", () => {
     text: "Selected: 13-Jul-2026 view full history",
   });
   assert.equal(countReviewersTowardTarget([reviewer]), 1);
+});
+
+test("recognizes reviewer statuses that allow a replacement", () => {
+  assert.equal(reviewerNeedsReplacement({ status: "Declined" }), true);
+  assert.equal(reviewerNeedsReplacement({ status: "Auto-Declined invite again" }), true);
+  assert.equal(reviewerNeedsReplacement({ status: "Unavailable invite again" }), true);
+  assert.equal(reviewerNeedsReplacement({ status: "Rejected" }), true);
+  assert.equal(reviewerNeedsReplacement({ status: "Account Removed" }), true);
+  assert.equal(reviewerNeedsReplacement({
+    status: "Agreed",
+    history: "Overdue Time in Review: 30 Days",
+  }), true);
+  assert.equal(reviewerNeedsReplacement({ status: "Selected" }), false);
+  assert.equal(reviewerNeedsReplacement({
+    status: "Selected",
+    history: "Overdue Time in Review: 30 Days",
+  }), false);
+  assert.equal(reviewerNeedsReplacement({ status: "Invited" }), false);
+  assert.equal(reviewerNeedsReplacement({ status: "Agreed" }), false);
 });
 
 test("treats the empty 0-0 of 0 range as valid", () => {

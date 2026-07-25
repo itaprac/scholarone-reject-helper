@@ -188,6 +188,28 @@ main {
   max-width: 900px;
 }
 
+.screening-core-settings {
+  grid-template-columns: repeat(4, minmax(170px, 260px));
+  max-width: 1060px;
+}
+
+.assessment-prompt-label {
+  margin-top: 18px;
+  max-width: 880px;
+}
+
+.assessment-prompt-label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#assessmentPrompt {
+  min-height: 150px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
 label {
   display: grid;
   gap: 5px;

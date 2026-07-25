@@ -75,6 +75,34 @@ export function buildReviewerJobArgs(mode, body) {
   return args;
 }
 
+export function buildScreeningJobArgs(body, { applyDecisions = false } = {}) {
+  const args = ["--headed", "--collect-metadata", "--assess-with-llm"];
+  if (applyDecisions) {
+    args.push("--apply-assessment-decisions");
+  }
+  if (body.screeningScanAll) {
+    args.push("--scan-all-metadata");
+  }
+  args.push(...optionArgs(body, {
+    "start-url": "screeningStartUrl",
+    "max-checked": "screeningMaxChecked",
+    "slow-mo": "screeningSlowMo",
+    "assessment-model": "assessmentModel",
+    "assessment-reasoning-effort": "assessmentReasoningEffort",
+    "assessment-timeout-seconds": "assessmentTimeoutSeconds",
+    "assessment-prompt": "assessmentPrompt",
+  }));
+  if (applyDecisions) {
+    args.push(...optionArgs(body, {
+      "screening-reject-message": "screeningRejectMessage",
+    }));
+  }
+  if (body.screeningKeepOpen) {
+    args.push("--keep-open");
+  }
+  return args;
+}
+
 function optionArgs(body, mapping) {
   const args = [];
   for (const [flag, key] of Object.entries(mapping)) {

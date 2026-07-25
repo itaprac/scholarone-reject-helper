@@ -5,7 +5,14 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { buildJobArgs, buildReviewerJobArgs } from "./job-args.js";
+import { DEFAULT_ASSESSMENT_PROMPT } from "./default-assessment-prompt.js";
+import { DEFAULT_SCREENING_REJECT_MESSAGE } from "./default-screening-reject-message.js";
+import {
+  DEFAULT_ASSESSMENT_MODEL,
+  DEFAULT_ASSESSMENT_REASONING_EFFORT,
+  normalizeAssessmentReasoningEffort,
+} from "./assessment-config.js";
+import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,6 +93,21 @@ const server = http.createServer(async (req, res) => {
       validateRunOptions(body, "reviewers-invite");
       const args = buildReviewerJobArgs("reviewers-invite", body);
       return sendJson(res, { job: startJob("reviewers-invite", args, scholarOneScript) });
+    }
+
+    if (url.pathname === "/api/run/screening/collect" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "screening");
+      const args = buildScreeningJobArgs(body);
+      return sendJson(res, { job: startJob("initial-assessment-dryrun", args) });
+    }
+
+    if (url.pathname === "/api/run/screening/live" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      body.screeningLive = true;
+      validateRunOptions(body, "screening");
+      const args = buildScreeningJobArgs(body, { applyDecisions: true });
+      return sendJson(res, { job: startJob("initial-assessment-live", args) });
     }
 
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
@@ -186,6 +208,24 @@ async function publicConfig() {
     reviewerSlowMo: saved.reviewerSlowMo ?? envValue("SLOW_MO", "500"),
     reviewerRefreshWaitSeconds: saved.reviewerRefreshWaitSeconds ?? envValue("REVIEWER_REFRESH_WAIT_SECONDS", "60"),
     reviewerKeepOpen: saved.reviewerKeepOpen ?? false,
+    screeningStartUrl: saved.screeningStartUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
+    screeningMaxChecked: saved.screeningMaxChecked ?? "10",
+    screeningScanAll: saved.screeningScanAll ?? true,
+    screeningSlowMo: saved.screeningSlowMo ?? envValue("SLOW_MO", "500"),
+    screeningKeepOpen: false,
+    assessmentModel: String(
+      saved.assessmentModel ||
+      envValue("ASSESSMENT_MODEL", DEFAULT_ASSESSMENT_MODEL) ||
+      DEFAULT_ASSESSMENT_MODEL
+    ).trim(),
+    assessmentReasoningEffort: normalizeAssessmentReasoningEffort(
+      saved.assessmentReasoningEffort ??
+      envValue("ASSESSMENT_REASONING_EFFORT", DEFAULT_ASSESSMENT_REASONING_EFFORT)
+    ),
+    assessmentTimeoutSeconds: saved.assessmentTimeoutSeconds ?? envValue("ASSESSMENT_TIMEOUT_SECONDS", "120"),
+    assessmentPrompt: saved.assessmentPrompt ?? envValue("ASSESSMENT_PROMPT", DEFAULT_ASSESSMENT_PROMPT).replace(/\\n/g, "\n"),
+    screeningRejectMessage: saved.screeningRejectMessage ??
+      envValue("SCREENING_REJECT_MESSAGE", DEFAULT_SCREENING_REJECT_MESSAGE).replace(/\\n/g, "\n"),
   };
 }
 
@@ -208,6 +248,18 @@ async function saveUiSettings(body) {
     reviewerSlowMo: normalizeIntegerSetting(body.reviewerSlowMo, "500", 0),
     reviewerRefreshWaitSeconds: normalizeIntegerSetting(body.reviewerRefreshWaitSeconds, "60"),
     reviewerKeepOpen: Boolean(body.reviewerKeepOpen),
+    screeningStartUrl: String(body.screeningStartUrl || "").trim(),
+    screeningMaxChecked: normalizeIntegerSetting(body.screeningMaxChecked, "10"),
+    screeningScanAll: Boolean(body.screeningScanAll),
+    screeningSlowMo: normalizeIntegerSetting(body.screeningSlowMo, "500", 0),
+    screeningKeepOpen: Boolean(body.screeningKeepOpen),
+    assessmentModel: String(body.assessmentModel || DEFAULT_ASSESSMENT_MODEL).trim(),
+    assessmentReasoningEffort: normalizeAssessmentReasoningEffort(
+      body.assessmentReasoningEffort
+    ),
+    assessmentTimeoutSeconds: normalizeIntegerSetting(body.assessmentTimeoutSeconds, "120", 10),
+    assessmentPrompt: String(body.assessmentPrompt || "").trim(),
+    screeningRejectMessage: String(body.screeningRejectMessage || "").trimEnd(),
   };
 
   if (!settings.startUrl) {
@@ -218,6 +270,15 @@ async function saveUiSettings(body) {
   }
   if (!settings.reviewerStartUrl) {
     settings.reviewerStartUrl = settings.startUrl;
+  }
+  if (!settings.screeningStartUrl) {
+    settings.screeningStartUrl = settings.startUrl;
+  }
+  if (!settings.assessmentPrompt) {
+    settings.assessmentPrompt = DEFAULT_ASSESSMENT_PROMPT;
+  }
+  if (!settings.screeningRejectMessage) {
+    settings.screeningRejectMessage = DEFAULT_SCREENING_REJECT_MESSAGE;
   }
 
   await fsp.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");

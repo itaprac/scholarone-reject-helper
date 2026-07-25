@@ -181,6 +181,40 @@ test("existing-email Create Account state supports ScholarOne's generic save.gif
   }
 });
 
+test("existing-email Save and Add may become visible shortly after DOMContentLoaded", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+
+  try {
+    await page.setContent(`
+      <p>A person with this e-mail address already exists in the system:</p>
+      <input name="EMAIL_ADDRESS" value="apatra@radford.edu">
+      <a id="save-and-add" href="javascript:void(0)" style="display: none">
+        <img src="/images/en_US/buttons/save_add.gif" width="120" height="18">
+      </a>
+    `);
+    await page.evaluate(() => {
+      setTimeout(() => {
+        document.querySelector("#save-and-add").style.display = "inline";
+      }, 200);
+    });
+
+    assert.deepEqual(await readExistingEmailConflict(page, {
+      name: "Amar Nath Patra",
+      email: "apatra@radford.edu",
+    }, {
+      controlVisibilityTimeout: 2_000,
+    }), {
+      email: "apatra@radford.edu",
+      emailMatches: true,
+      controlCount: 1,
+      controlVisible: true,
+    });
+  } finally {
+    await browser.close();
+  }
+});
+
 async function loadPage(context, file) {
   const page = await context.newPage();
   await page.setContent(await fsp.readFile(file, "utf8"), { waitUntil: "domcontentloaded" });

@@ -1,8 +1,9 @@
 # ScholarOne reject and reviewer-selection helper
 
-Automat Playwright ma dwa niezależne tryby:
+Automat Playwright ma trzy niezależne tryby:
 
 - dotychczasowe sprawdzanie kolejki `Complete Checklist` i kontrolowane odrzucanie,
+- wstępna ocena artykułów na podstawie tytułu i abstraktu przez Codex CLI,
 - wybór recenzentów z `Manage → Admin Center → Select Reviewers`.
 
 Tryb odrzucania zachowuje dotychczasowe komendy i działanie.
@@ -10,6 +11,9 @@ Tryb odrzucania zachowuje dotychczasowe komendy i działanie.
 ## Co trzeba miec
 
 Node.js 18 lub nowszy.
+
+Do testowej oceny LLM potrzebny jest także Codex CLI zalogowany przez `codex login`.
+Stan połączenia można sprawdzić komendą `codex login status`.
 
 Potem w katalogu projektu:
 
@@ -74,7 +78,7 @@ http://localhost:3131
 
 W panelu mozesz:
 
-- przelaczac sie miedzy osobnymi kartami `Auto-reject` i `Reviewers`,
+- przelaczac sie miedzy osobnymi kartami `Auto-reject`, `Initial assessment` i `Reviewers`,
 - odpalic `Run dry run`,
 - odpalic normalny `Run + reject`,
 - wybrac raport z dry-runu i kliknac `Reject selected report`,
@@ -82,6 +86,61 @@ W panelu mozesz:
 - wybrac i zaprosic reviewerow dla kilku artykulow kolejno w jednej partii,
 - zmienic tekst maila w `Settings`,
 - zapisac ustawienia do `ui-settings.json`.
+
+## Wstępna ocena artykułów przez LLM
+
+Ten tryb korzysta z kolejki `Manage → Admin Center → Complete Checklist`.
+Manuskrypty, których ID kończy się na `.R` + liczba (np. `.R1` lub `.R10`),
+automatycznie otrzymują `APPROVE`, także przy czerwonym alercie, bez otwierania
+abstraktu i bez wywołania LLM. Pozostałe manuskrypty z komunikatem
+`High rate of unusual activity` są pomijane. Dla każdego innego artykułu helper
+zapisuje tytuł, otwiera popup `Abstract`, kopiuje abstrakt i zamyka popup, a
+następnie wysyła komplet danych do `codex exec` w trybie bezinterakcyjnym i tylko
+do odczytu.
+
+Codex ocenia każdy artykuł według edytowalnych reguł i zwraca `APPROVE` albo
+`REJECT` w ścisłym JSON. Karta udostępnia dwa osobne uruchomienia. `Dry run`
+zapisuje `WOULD_CONTINUE` albo `WOULD_STOP` bez akcji w ScholarOne. `Live`
+wykonuje decyzję: dla `REJECT` wysyła osobną wiadomość skonfigurowaną w polu
+`Live rejection email`, a dla `APPROVE`
+zaznacza oba pola Admin Checklist, zatwierdza pracę i przypisuje Wojciecha
+Sałabuna kolejno jako Editor-in-Chief oraz Associate Editor. Live zatrzymuje
+całą kolejkę na pierwszym kroku, którego nie uda się jednoznacznie potwierdzić.
+
+Prompt oceny można edytować i zapisać w karcie `Initial assessment`. Domyślny
+prompt stosuje regułę `Probability of REJECT > 40% → REJECT`. Helper jawnie
+uruchamia model `gpt-5.6-terra` z poziomem reasoning `medium`.
+Oba ustawienia można zmienić w panelu. Domyślny zakres `Entire queue` przechodzi
+przez całą dostępną kolejkę; opcja `Use safety limit` pozwala ograniczyć przebieg.
+Uruchomienia z UI automatycznie zamykają przeglądarkę po zakończeniu tego workflow.
+Wyniki wszystkich artykułów trafiają do tablicy `manuscripts` w jednym pliku JSON
+w `logs/screening/`. Obok powstaje czytelny plik `*-summary.csv`, zawierający
+tytuł, abstrakt, decyzję, uzasadnienie, ewentualną akcję lub błąd, czas oceny oraz
+zużycie tokenów dla każdego artykułu. Każde wywołanie LLM zapisuje też końcową
+odpowiedź `*-llm.json` i surowy ślad Codex `*-llm-events.jsonl`.
+
+W terminalu po każdej ocenie pojawia się `[LLM USAGE]`, a na końcu przebiegu
+`[TOKEN SUMMARY]`. Licznik `input` obejmuje już tokeny z cache, a `output`
+obejmuje tokeny reasoning, dlatego `razem` jest liczone jako `input + output`
+bez ponownego dodawania pól `cache` i `reasoning`.
+
+Najprościej uruchomić go z karty `Initial assessment` w UI albo z terminala:
+
+```bash
+npm run screen-manuscript -- --max-checked=10 --slow-mo=500 --keep-open
+```
+
+Rzeczywiste wykonanie decyzji jest dostępne osobną komendą i wymaga jawnej flagi:
+
+```bash
+npm run screen-manuscript:live -- --max-checked=10 --slow-mo=500 --screening-reject-message-file=screening-reject-message.txt
+```
+
+Poprzedni etap bez wywołania LLM pozostaje dostępny osobno:
+
+```bash
+npm run screen-metadata -- --max-checked=10 --slow-mo=500
+```
 
 Przed akcja, ktora naprawde odrzuca artykuly, UI pokazuje dodatkowe okno potwierdzenia.
 Przycisk `Select + invite batch` jest jawnym uruchomieniem wysylki i nie wymaga

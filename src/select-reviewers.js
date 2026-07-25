@@ -7,10 +7,13 @@ import {
   classifyReviewerStatus,
   countReviewersTowardTarget,
   parseListRange,
+  reviewerNeedsReplacement,
   samePerson,
   selectUniqueCandidates,
 } from "./reviewer-rules.js";
 import { REVIEWER_SELECTORS } from "./reviewer-selectors.js";
+import { isRevisionManuscriptId } from "./manuscript-rules.js";
+import { hasUnusualActivityAlert } from "./screening-metadata.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -42,6 +45,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
     await ensureLoggedIn(page, config, log);
     const results = [];
     const deferredReviewers = [];
+    const skippedManuscriptIds = new Set();
     let queueExhausted = false;
 
     for (batchIndex = 1; batchIndex <= config.maxManuscripts; batchIndex += 1) {
@@ -59,12 +63,18 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           logFile,
           screenshotDir,
           batchIndex,
-          excludedManuscriptIds: deferredReviewers.map(({ manuscriptId }) => manuscriptId),
+          excludedManuscriptIds: [
+            ...deferredReviewers.map(({ manuscriptId }) => manuscriptId),
+            ...skippedManuscriptIds,
+          ],
         });
         if (isReviewerSearchDeferredResult(result)) {
           rememberDeferredReviewer(deferredReviewers, result, batchIndex);
         } else {
           results.push(result);
+          if (isReviewerManuscriptSkippedResult(result)) {
+            skippedManuscriptIds.add(result.manuscript.manuscriptId);
+          }
         }
         await log("batch_manuscript_finished", {
           batchIndex,
@@ -72,9 +82,14 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           status: result.status,
           manuscript: result.manuscript,
           deferred: deferredReviewers.length,
+          skipped: skippedManuscriptIds.size,
         });
 
-        if (!config.inviteAll && !isReviewerSearchDeferredResult(result)) break;
+        if (
+          !config.inviteAll &&
+          !isReviewerSearchDeferredResult(result) &&
+          !isReviewerManuscriptSkippedResult(result)
+        ) break;
       } catch (error) {
         if ((batchIndex > 1 || deferredReviewers.length > 0) && isQueueExhaustedError(error)) {
           queueExhausted = true;
@@ -90,9 +105,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
         throw error;
       }
 
-      await log("batch_return_to_start", { batchIndex, url: config.startUrl });
-      await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-      await ensureLoggedIn(page, config, log);
+      await returnToReviewerStart(page, config, log, "batch_next_manuscript");
     }
 
     while (deferredReviewers.length > 0) {
@@ -157,6 +170,14 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
 
 export function isReviewerSearchDeferredResult(result) {
   return result?.status === "reviewer_search_deferred";
+}
+
+export function isReviewerManuscriptSkippedResult(result) {
+  return result?.status === "reviewer_manuscript_skipped";
+}
+
+export function reviewerArticleSkipReason(bodyText) {
+  return hasUnusualActivityAlert(bodyText) ? "unusual_activity_alert" : null;
 }
 
 export function rememberDeferredReviewer(queue, result, batchIndex, attempts = 1) {
@@ -333,9 +354,14 @@ async function recoverReviewerManuscript(page, options, originalError) {
 }
 
 async function returnToReviewerStart(page, config, log, reason) {
-  await log("reviewer_return_to_start", { reason, url: config.startUrl });
-  await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
-  await ensureLoggedIn(page, config, log);
+  if (page.isClosed()) throw new Error("Karta ScholarOne została zamknięta.");
+  await page.bringToFront().catch(() => undefined);
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+  const state = await detectReviewerPageState(page);
+  await log("reviewer_navigation_reused", { reason, state, url: page.url() });
+  if (state === "login") {
+    await ensureLoggedIn(page, config, log, reason);
+  }
 }
 
 async function runOneReviewerManuscript(page, {
@@ -353,7 +379,7 @@ async function runOneReviewerManuscript(page, {
   let manuscript = null;
 
   try {
-    await ensureReviewerQueue(page, log, queueLabel);
+    await ensureReviewerQueue(page, config, log, queueLabel);
     const queueItem = await openReviewerArticle(
       page,
       log,
@@ -364,6 +390,11 @@ async function runOneReviewerManuscript(page, {
     await waitForReviewerArticle(page);
 
     manuscript = await readManuscriptIdentity(page);
+    if (!manuscript.manuscriptId) {
+      manuscript.manuscriptId = queueItem.rowText
+        ?.match(/\b([A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?)\b/i)?.[1]
+        ?.toUpperCase() || null;
+    }
     stage = "reading_article";
     if (targetManuscriptId && manuscript.manuscriptId !== targetManuscriptId) {
       throw new Error(`Otworzono ${manuscript.manuscriptId || "nieznany artykuł"} zamiast ${targetManuscriptId}.`);
@@ -377,18 +408,46 @@ async function runOneReviewerManuscript(page, {
       url: page.url(),
     });
 
+    const skipReason = reviewerArticleSkipReason(await page.locator("body").innerText());
+    if (skipReason) {
+      const result = {
+        status: "reviewer_manuscript_skipped",
+        reason: skipReason,
+        manuscript,
+        queueLabel,
+        logFile,
+      };
+      await log("reviewer_manuscript_skipped", result);
+      return result;
+    }
+
     const initialReviewers = await readAllReviewerList(page, log);
     const initialCount = countReviewersTowardTarget(initialReviewers);
     await log("reviewer_list_initial", summarizeReviewerList(initialReviewers, initialCount));
 
+    const selectionPolicy = reviewerSelectionPolicy(
+      manuscript.manuscriptId,
+      queueLabel,
+      initialReviewers
+    );
+    await log("reviewer_selection_policy", {
+      manuscriptId: manuscript.manuscriptId,
+      ...selectionPolicy,
+      reviewersNeedingReplacement: initialReviewers
+        .filter(reviewerNeedsReplacement)
+        .map(publicReviewer),
+    });
+
     stage = "selecting_reviewers";
     let selection;
     try {
-      selection = await addReviewersToTarget(page, {
-        target: config.reviewersPerPaper,
-        initialReviewers,
-        log,
-      });
+      selection = selectionPolicy.addNewReviewers
+        ? await addReviewersToTarget(page, {
+          target: config.reviewersPerPaper,
+          initialReviewers,
+          log,
+        })
+        : { added: [], skipped: [], reviewers: initialReviewers };
     } catch (error) {
       if (!isReviewerCandidateShortage(error)) throw error;
       stage = "refreshing_reviewer_search";
@@ -414,6 +473,8 @@ async function runOneReviewerManuscript(page, {
     const beforeInviteCounters = await readArticleCounters(page);
     await log("selection_target_reached", {
       target: config.reviewersPerPaper,
+      targetEnforced: selectionPolicy.addNewReviewers,
+      policyReason: selectionPolicy.reason,
       added: selection.added.length,
       skipped: selection.skipped.map(publicPerson),
       countTowardTarget: countReviewersTowardTarget(beforeInviteReviewers),
@@ -449,7 +510,11 @@ async function runOneReviewerManuscript(page, {
     stage = "sending_invitations";
     const sendResult = await clickFinalInviteAll(invitePopup, log);
     stage = "verifying_invitations";
-    await restoreReviewerArticleAfterInvite(page, log);
+    await restoreReviewerArticleAfterInvite(page, {
+      config,
+      log,
+      manuscriptId: manuscript.manuscriptId,
+    });
 
     const afterInviteReviewers = await readAllReviewerList(page, log);
     const afterInviteCounters = await readArticleCounters(page);
@@ -488,34 +553,95 @@ async function runOneReviewerManuscript(page, {
   }
 }
 
-async function restoreReviewerArticleAfterInvite(page, log) {
+async function restoreReviewerArticleAfterInvite(page, { config, log, manuscriptId }) {
   await page.bringToFront().catch(() => undefined);
-  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => undefined);
+  // ScholarOne refreshes the opener asynchronously after the popup closes. The
+  // page can remain a blank/partial shell for over ten seconds, especially with
+  // slowMo. Do not navigate away: a sent manuscript is expected to disappear
+  // from both reviewer work queues.
+  const automatic = await waitForReviewerArticleIdentity(page, manuscriptId, 45_000);
+  await log("reviewer_restore_state", {
+    manuscriptId,
+    state: automatic.state,
+    observedStates: automatic.observedStates,
+    automaticRefresh: automatic.ready,
+    url: page.url(),
+  });
+  if (automatic.ready) return;
 
-  let lastError;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    try {
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
-      await waitForReviewerArticle(page, 20_000);
-      await log("reviewer_article_reloaded_after_invite", { attempt, url: page.url() });
-      return;
-    } catch (error) {
-      lastError = error;
-      if (!/ERR_ABORTED|frame was detached|execution context|navigation|Target page/i.test(error.message || "")) {
-        throw error;
-      }
-      await log("reviewer_article_reload_retry", { attempt, message: error.message, url: page.url() });
-      await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => undefined);
-      try {
-        await waitForReviewerArticle(page, 8_000);
-        await log("reviewer_article_ready_after_aborted_reload", { attempt, url: page.url() });
-        return;
-      } catch {
-        await page.waitForTimeout(400).catch(() => undefined);
-      }
-    }
+  if (automatic.state === "login") {
+    await ensureLoggedIn(page, config, log, "after_invite");
   }
-  throw lastError;
+
+  await ensureAdminCenter(page, config, log, "after_invite_quick_search");
+  const quickSearchResult = await openReviewerArticleFromQuickSearch(page, manuscriptId, log);
+  if (quickSearchResult.opened) {
+    await log("reviewer_article_reopened_after_invite", {
+      manuscriptId,
+      method: quickSearchResult.method,
+      url: page.url(),
+    });
+    return;
+  }
+  throw new Error(
+    `Zaproszenia zostały wysłane, ale nie udało się ponownie otworzyć ${manuscriptId} przez Quick Search do bezpiecznej weryfikacji (${quickSearchResult.reason || "nieznany błąd"}).`
+  );
+}
+
+export async function waitForReviewerArticleIdentity(page, manuscriptId, timeout = 45_000) {
+  const deadline = Date.now() + timeout;
+  const observedStates = [];
+  let lastState = null;
+  let stableTerminalStateCount = 0;
+
+  while (Date.now() < deadline) {
+    if (page.isClosed()) throw new Error("Karta ScholarOne została zamknięta podczas weryfikacji zaproszeń.");
+    await page.waitForLoadState("domcontentloaded", { timeout: 1_000 }).catch(() => undefined);
+    const state = await detectReviewerPageState(page);
+    if (state !== lastState) observedStates.push(state);
+    stableTerminalStateCount = state === lastState && state === "login"
+      ? stableTerminalStateCount + 1
+      : 0;
+    lastState = state;
+
+    if (state === "reviewer_article") {
+      const current = await readManuscriptIdentity(page);
+      if (current.manuscriptId !== manuscriptId) {
+        throw new Error(`Po Invite All otwarto ${current.manuscriptId || "inny manuskrypt"} zamiast ${manuscriptId}.`);
+      }
+      return { ready: true, state, observedStates };
+    }
+    if (stableTerminalStateCount >= 8) break;
+    await page.waitForTimeout(500).catch(() => undefined);
+  }
+  return { ready: false, state: lastState || "unknown", observedStates };
+}
+
+async function refreshCurrentReviewerTask(page, log, reason) {
+  const submitted = await submitScholarOneLinkByText(
+    page,
+    /^(?:invite|select)\s+reviewers$/i,
+    /MANUSCRIPT_DETAILS_SHOW_TAB/i
+  );
+  if (!submitted) return false;
+
+  try {
+    await waitForReviewerArticle(page, 20_000);
+    await log("reviewer_article_refreshed", {
+      reason,
+      method: "reviewer_task_form_submit",
+      url: page.url(),
+    });
+    return true;
+  } catch (error) {
+    await log("reviewer_article_refresh_failed", {
+      reason,
+      message: error.message,
+      state: await detectReviewerPageState(page),
+      url: page.url(),
+    });
+    return false;
+  }
 }
 
 function isQueueExhaustedError(error) {
@@ -533,6 +659,32 @@ export function reviewerQueueLabels(mode) {
   if (mode === "invite") return ["Invite Reviewers"];
   if (mode === "select") return ["Select Reviewers"];
   throw new Error(`Nieznany tryb kolejki reviewerów: ${mode}`);
+}
+
+export function reviewerSelectionPolicy(manuscriptId, queueLabel, reviewers) {
+  const isRevision = isRevisionManuscriptId(manuscriptId);
+  const isInviteQueue = queueLabel === "Invite Reviewers";
+  const hasReviewerNeedingReplacement = reviewers.some(reviewerNeedsReplacement);
+
+  if (isRevision && isInviteQueue && !hasReviewerNeedingReplacement) {
+    return {
+      isRevision,
+      isInviteQueue,
+      addNewReviewers: false,
+      reason: "revision_reuses_existing_reviewers",
+    };
+  }
+
+  return {
+    isRevision,
+    isInviteQueue,
+    addNewReviewers: true,
+    reason: !isInviteQueue
+      ? "select_reviewers_queue_fills_target"
+      : isRevision
+        ? "revision_has_reviewer_needing_replacement"
+        : "original_submission_fills_reviewer_target",
+  };
 }
 
 export function canRecoverReviewerContext(context) {
@@ -615,74 +767,167 @@ async function createBrowserSession(config) {
   };
 }
 
-async function ensureLoggedIn(page, config, log) {
+async function ensureLoggedIn(page, config, log, reason = "unknown") {
   if (!(await isLoginPage(page))) {
-    await log("login_not_required", { url: page.url() });
+    await log("login_not_required", { reason, url: page.url() });
     return;
   }
 
   if (config.autoLogin && config.username && config.password) {
-    await log("auto_login_started", { url: page.url() });
+    await log("auto_login_started", { reason, url: page.url() });
     const username = page.locator("#USERID").first();
     const password = page.locator("#PASSWORD").first();
     const login = page.locator("#logInButton").first();
-    if (await username.isVisible().catch(() => false) &&
-        await password.isVisible().catch(() => false) &&
-        await login.isVisible().catch(() => false)) {
+    const knownSelectorsReady = await username.isVisible({ timeout: 2_000 }).catch(() => false) &&
+      await password.isVisible({ timeout: 2_000 }).catch(() => false) &&
+      await login.isVisible({ timeout: 2_000 }).catch(() => false);
+
+    if (knownSelectorsReady) {
+      await username.click({ timeout: 5_000 }).catch(() => undefined);
       await username.fill(config.username);
+      await password.click({ timeout: 5_000 }).catch(() => undefined);
       await password.fill(config.password);
-      const navigation = waitForNavigation(page, 15_000);
-      await login.click();
-      await navigation;
-      if (!(await isLoginPage(page))) {
-        await log("auto_login_succeeded", { url: page.url() });
-        return;
+
+      let clickedWith = "playwright";
+      try {
+        await login.click({ timeout: 5_000 });
+      } catch {
+        clickedWith = "dom_fallback";
+        await page.evaluate(() => {
+          const button = document.querySelector("#logInButton");
+          if (!button) return false;
+          button.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+          button.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+          button.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+          button.click();
+          return true;
+        }).catch(() => false);
       }
-      const enterNavigation = waitForNavigation(page, 10_000);
-      await password.press("Enter").catch(() => undefined);
-      await enterNavigation;
-      if (!(await isLoginPage(page))) {
-        await log("auto_login_succeeded", { url: page.url(), fallback: "password_enter" });
+
+      let loggedIn = await waitForReviewerLoggedIn(page, 15_000);
+      let pressedEnterFallback = false;
+      if (!loggedIn) {
+        pressedEnterFallback = true;
+        await password.press("Enter").catch(() => page.keyboard.press("Enter").catch(() => undefined));
+        loggedIn = await waitForReviewerLoggedIn(page, 10_000);
+      }
+
+      await log("auto_login_attempted", {
+        reason,
+        clickedWith,
+        pressedEnterFallback,
+        loggedIn,
+        url: page.url(),
+      });
+      if (loggedIn || !(await isLoginPage(page))) {
+        await log("auto_login_succeeded", { reason, url: page.url() });
         return;
       }
     }
-    await log("auto_login_failed", { url: page.url() });
+    await log("auto_login_failed", {
+      reason,
+      knownSelectorsReady,
+      url: page.url(),
+      failureText: await readLoginFailureText(page),
+    });
   }
 
   console.log("Zaloguj się ręcznie w otwartym oknie ScholarOne; automat czeka maksymalnie 5 minut.");
-  await log("manual_login_wait_started", { url: page.url() });
-  await page.waitForFunction(() => {
-    const text = document.body?.innerText || "";
-    const passwordVisible = Array.from(document.querySelectorAll("input[type='password']"))
-      .some((element) => element.getBoundingClientRect().width > 0);
-    return !passwordVisible && /log\s*out|manage|admin\s+center/i.test(text);
-  }, null, { timeout: 5 * 60 * 1000 });
-  await log("manual_login_succeeded", { url: page.url() });
+  await log("manual_login_wait_started", { reason, url: page.url() });
+  if (!(await waitForReviewerLoggedIn(page, 5 * 60 * 1000))) {
+    throw new Error("Nie potwierdzono logowania do ScholarOne w ciągu 5 minut.");
+  }
+  await log("manual_login_succeeded", { reason, url: page.url() });
 }
 
 async function isLoginPage(page) {
-  return page.evaluate(() => Array.from(document.querySelectorAll("input[type='password']"))
-    .some((element) => {
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    })).catch(() => false);
+  return (await detectReviewerPageState(page)) === "login";
 }
 
-async function ensureReviewerQueue(page, log, queueLabel) {
+async function waitForReviewerLoggedIn(page, timeout) {
+  return page.waitForFunction(() => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 &&
+        style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const text = (document.body?.innerText || "").replace(/\s+/g, " ");
+    const passwordVisible = Array.from(document.querySelectorAll("input[type='password']")).some(visible);
+    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|select\s+reviewers|invite\s+reviewers|view\s+details/i.test(text) ||
+      Boolean(document.querySelector("#QUICK_SEARCH_HEADER_SEARCH_TEXT"));
+    return loggedInMarker && !passwordVisible;
+  }, null, { timeout }).then(() => true).catch(() => false);
+}
+
+async function readLoginFailureText(page) {
+  return page.evaluate(() => {
+    const visible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 &&
+        style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const messages = Array.from(document.querySelectorAll(
+      ".alert, .alert-error, .error, .errors, .text-error, #error, [role='alert'], .help-inline"
+    )).filter(visible).map((element) => (element.innerText || "").replace(/\s+/g, " ").trim());
+    return messages.find((text) =>
+      /invalid|incorrect|required|captcha|locked|expired|failed|error|not\s+recognized/i.test(text)
+    )?.slice(0, 300) || null;
+  }).catch(() => null);
+}
+
+async function ensureReviewerQueue(page, config, log, queueLabel) {
   const queuePattern = new RegExp(`^${queueLabel.replace(/\s+/g, "\\s+")}$`, "i");
   const queueType = queueLabel.toLowerCase().replace(/\s+/g, "_");
   await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-  if (await page.locator(REVIEWER_SELECTORS.queueAction).count() > 0) {
+  await ensureLoggedIn(page, config, log, `reviewer_queue_${queueType}`);
+
+  if (await isReviewerQueuePage(page, queueLabel)) {
     await log("reviewer_queue_ready", { queueLabel, queueType, source: "current_page", url: page.url() });
     return;
   }
 
-  await log("navigate_admin_center_started", { url: page.url() });
-  let adminActivated = false;
-  if (await hasVisibleTextControl(page, /^admin\s+center$/i)) {
-    adminActivated = await activateLinkByText(page, /^admin\s+center$/i) ||
+  await ensureAdminCenter(page, config, log, `reviewer_queue_${queueType}`);
+  const queueVisible = await waitForVisibleTextControl(page, queuePattern, 12_000);
+  if (!queueVisible) throw new Error(`Nie znaleziono linku ${queueLabel} w Admin Center.`);
+  if (!(await activateLinkByText(page, queuePattern)) &&
+      !(await clickTextControl(page, queuePattern))) {
+    throw new Error(`Nie udało się aktywować kolejki ${queueLabel} w Admin Center.`);
+  }
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+
+  await waitForReviewerQueue(page, queueLabel, 15_000);
+  await log("reviewer_queue_ready", {
+    queueLabel,
+    queueType,
+    source: "admin_center",
+    url: page.url(),
+    items: await page.locator(REVIEWER_SELECTORS.queueAction).count(),
+  });
+}
+
+async function ensureAdminCenter(page, config, log, reason) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+  await ensureLoggedIn(page, config, log, reason);
+  if ((await detectReviewerPageState(page)) === "admin_center") {
+    await log("admin_center_ready", { reason, source: "current_page", url: page.url() });
+    return;
+  }
+
+  await log("navigate_admin_center_started", { reason, url: page.url() });
+  let adminActivated = (await detectReviewerPageState(page)) === "admin_center";
+  if (!adminActivated) {
+    adminActivated = await submitScholarOneLinkByText(
+      page,
+      /^admin\s+center$/i,
+      /DASHBOARD|XIK_CUR_ROLE_ID/i
+    );
+  }
+  if (!adminActivated && await hasVisibleTextControl(page, /^admin\s+center$/i)) {
+    adminActivated ||= await activateLinkByText(page, /^admin\s+center$/i) ||
       await clickTextControl(page, /^admin\s+center$/i);
-  } else {
+  } else if (!adminActivated) {
     const manageOpened = await openManageMenu(page);
     await log("manage_menu_attempted", {
       manageOpened,
@@ -697,34 +942,185 @@ async function ensureReviewerQueue(page, log, queueLabel) {
   if (!adminActivated) {
     throw new Error("Nie udało się otworzyć Admin Center z menu Manage.");
   }
-  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-  const queueVisible = await waitForVisibleTextControl(page, queuePattern, 12_000);
-  await log("admin_center_opened", {
-    url: page.url(),
-    queueLabel,
-    queueVisible,
-  });
-  if (!queueVisible && await page.locator(REVIEWER_SELECTORS.queueAction).count() === 0) {
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline && (await detectReviewerPageState(page)) !== "admin_center") {
+    if (await isLoginPage(page)) await ensureLoggedIn(page, config, log, `${reason}_admin_center`);
+    await page.waitForTimeout(250);
+  }
+  if ((await detectReviewerPageState(page)) !== "admin_center") {
     throw new Error("Admin Center został aktywowany, ale strona Admin Center nie załadowała się poprawnie.");
   }
-  if (await page.locator(REVIEWER_SELECTORS.queueAction).count() > 0) {
-    await log("reviewer_queue_ready", { queueLabel, queueType, source: "admin_center_direct", url: page.url() });
-    return;
-  }
-  if (!(await activateLinkByText(page, queuePattern)) &&
-      !(await clickTextControl(page, queuePattern))) {
-    throw new Error(`Nie znaleziono linku ${queueLabel} w Admin Center.`);
-  }
-  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  await log("admin_center_ready", { reason, source: "navigation", url: page.url() });
+}
 
-  await page.waitForSelector(REVIEWER_SELECTORS.queueAction, { timeout: 15_000 });
-  await log("reviewer_queue_ready", {
-    queueLabel,
-    queueType,
-    source: "admin_center",
-    url: page.url(),
-    items: await page.locator(REVIEWER_SELECTORS.queueAction).count(),
-  });
+async function isReviewerQueuePage(page, queueLabel) {
+  return (await detectReviewerPageState(page, queueLabel)) === "reviewer_queue";
+}
+
+async function waitForReviewerQueue(page, queueLabel, timeout) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await isReviewerQueuePage(page, queueLabel)) return;
+    if (await isLoginPage(page)) {
+      throw new Error(`Sesja wygasła podczas otwierania kolejki ${queueLabel}.`);
+    }
+    await page.waitForTimeout(250);
+  }
+  throw new Error(`ScholarOne nie otworzył właściwej kolejki ${queueLabel}.`);
+}
+
+export async function detectReviewerPageState(page, queueLabel = null) {
+  return page.evaluate(({ queueActionSelector, expectedQueue }) => {
+    const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+    const visible = (element) => {
+      if (!element) return false;
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 &&
+        style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    };
+    const bodyText = clean(document.body?.innerText);
+    const passwordVisible = Array.from(document.querySelectorAll("input[type='password']")).some(visible);
+    const usernameVisible = Array.from(document.querySelectorAll("input")).some((input) =>
+      visible(input) && /USERID|user\s*name|user\s*id|login/i.test([
+        input.id,
+        input.name,
+        input.placeholder,
+        input.getAttribute("aria-label"),
+      ].filter(Boolean).join(" "))
+    );
+    const loginVisible = Array.from(document.querySelectorAll(
+      "a, button, input[type='button'], input[type='submit'], input[type='image']"
+    )).some((element) => visible(element) && /log\s*in|sign\s*in/i.test(clean([
+      element.textContent,
+      element.getAttribute("value"),
+      element.getAttribute("title"),
+      element.getAttribute("aria-label"),
+    ].filter(Boolean).join(" "))));
+    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|select\s+reviewers|invite\s+reviewers/i.test(bodyText) ||
+      Boolean(document.querySelector("#QUICK_SEARCH_HEADER_SEARCH_TEXT"));
+    if ((passwordVisible || (usernameVisible && loginVisible)) && !loggedInMarker) return "login";
+
+    const currentPage = document.querySelector("input[name='CURRENT_PAGE']")?.value || "";
+    const reviewerHeading = Array.from(document.querySelectorAll("b"))
+      .find((element) => /^reviewer\s+list$/i.test(clean(element.textContent)));
+    const reviewerHeaderText = clean(reviewerHeading?.closest("tr")?.innerText);
+    const reviewerArticle = currentPage === "MANUSCRIPT_DETAILS" &&
+      /\d+\s*-\s*\d+\s+of\s+\d+/i.test(reviewerHeaderText) &&
+      /reviewer\s+list/i.test(bodyText);
+    if (reviewerArticle) return "reviewer_article";
+
+    if (currentPage === "DASHBOARD" && /admin\s+(?:center|dashboard)/i.test(bodyText)) return "admin_center";
+
+    if (currentPage === "ADMIN_VIEW_MANUSCRIPTS") {
+      const headings = Array.from(document.querySelectorAll("b")).map((element) => clean(element.textContent));
+      if (expectedQueue && headings.some((text) => text.toLowerCase() === expectedQueue.toLowerCase())) {
+        return "reviewer_queue";
+      }
+      if (document.querySelector(queueActionSelector) || headings.length > 0) return "other_admin_queue";
+    }
+
+    return loggedInMarker ? "logged_in_other" : "unknown";
+  }, {
+    queueActionSelector: REVIEWER_SELECTORS.queueAction,
+    expectedQueue: queueLabel,
+  }).catch(() => "unknown");
+}
+
+async function openReviewerArticleFromQuickSearch(page, manuscriptId, log) {
+  if (!(await ensureHeaderSearchReady(page))) {
+    return { opened: false, reason: "quick_search_not_available" };
+  }
+
+  const input = page.locator("#QUICK_SEARCH_HEADER_SEARCH_TEXT").first();
+  const button = page.locator("#btn_search").first();
+  await input.fill("");
+  await input.fill(manuscriptId);
+  const navigation = waitForNavigation(page, 15_000);
+  await button.click({ timeout: 5_000 }).catch(() => input.press("Enter"));
+  await navigation;
+
+  if (await isLoginPage(page)) return { opened: false, reason: "login_after_quick_search" };
+  if ((await detectReviewerPageState(page)) === "reviewer_article") {
+    const current = await readManuscriptIdentity(page);
+    return { opened: current.manuscriptId === manuscriptId, method: "quick_search_direct" };
+  }
+
+  await page.waitForFunction(({ selector, targetId }) => {
+    const normalize = (value) => (value || "").toUpperCase().replace(/\s+/g, "");
+    return normalize(document.body?.innerText).includes(normalize(targetId)) &&
+      Boolean(document.querySelector(selector));
+  }, { selector: REVIEWER_SELECTORS.queueAction, targetId: manuscriptId }, {
+    timeout: 15_000,
+  }).catch(() => undefined);
+
+  const action = await findQuickSearchReviewerAction(page, manuscriptId);
+  if (!action) return { opened: false, reason: "reviewer_action_not_found" };
+
+  await log("reviewer_quick_search_action_selected", { manuscriptId, action });
+  const actionLocator = page.locator(REVIEWER_SELECTORS.queueAction).nth(action.index);
+  const actionNavigation = waitForNavigation(page, 15_000);
+  await actionLocator.selectOption(action.value);
+  await actionNavigation;
+
+  if (action.label === "View Details") {
+    const submitted = await submitScholarOneLinkByText(
+      page,
+      /^invite\s+reviewers$/i,
+      /MANUSCRIPT_DETAILS_SHOW_TAB/i
+    );
+    if (!submitted) return { opened: false, reason: "reviewer_tab_not_found_after_details" };
+  }
+
+  await waitForReviewerArticle(page, 20_000);
+  const current = await readManuscriptIdentity(page);
+  return {
+    opened: current.manuscriptId === manuscriptId,
+    method: `quick_search_${action.label.toLowerCase().replace(/\s+/g, "_")}`,
+  };
+}
+
+async function findQuickSearchReviewerAction(page, manuscriptId) {
+  return page.evaluate(({ selector, targetId }) => {
+    const normalize = (value) => (value || "").toUpperCase().replace(/\s+/g, "");
+    const target = normalize(targetId);
+    const actions = Array.from(document.querySelectorAll(selector));
+    for (let index = 0; index < actions.length; index += 1) {
+      const select = actions[index];
+      const rowText = normalize(select.closest("tr")?.innerText || select.closest("tr")?.textContent);
+      if (!rowText.includes(target)) continue;
+      const preferredLabels = ["Invite Reviewers", "Select Reviewers", "View Details"];
+      for (const label of preferredLabels) {
+        const option = Array.from(select.options).find((candidate) =>
+          (candidate.textContent || "").replace(/\s+/g, " ").trim() === label
+        );
+        if (option) return { index, value: option.value, label };
+      }
+    }
+    return null;
+  }, { selector: REVIEWER_SELECTORS.queueAction, targetId: manuscriptId }).catch(() => null);
+}
+
+async function ensureHeaderSearchReady(page) {
+  const input = page.locator("#QUICK_SEARCH_HEADER_SEARCH_TEXT").first();
+  if (await input.isVisible({ timeout: 1_500 }).catch(() => false)) return true;
+
+  const toggle = page.locator("#headerSearchbar").first();
+  if (await toggle.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    await toggle.click({ timeout: 3_000 }).catch(() => undefined);
+    await page.waitForTimeout(300);
+  }
+  if (await input.isVisible({ timeout: 3_000 }).catch(() => false)) return true;
+
+  await page.evaluate(() => {
+    const toggleControl = document.querySelector("#headerSearchbar");
+    if (!toggleControl) return false;
+    toggleControl.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    toggleControl.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    toggleControl.click();
+    return true;
+  }).catch(() => false);
+  return input.isVisible({ timeout: 3_000 }).catch(() => false);
 }
 
 async function openManageMenu(page) {
@@ -841,6 +1237,101 @@ async function activateLinkByText(page, pattern) {
     return true;
   }
   return false;
+}
+
+async function submitScholarOneLinkByText(page, pattern, scriptPattern = null) {
+  let submitted = false;
+  try {
+    submitted = await page.evaluate(({ source, scriptSource }) => {
+      const regex = new RegExp(source, "i");
+      const scriptRegex = scriptSource ? new RegExp(scriptSource, "i") : null;
+      const form = document.forms[0];
+      if (!form) return false;
+
+      const candidates = Array.from(document.querySelectorAll("a")).map((link) => {
+        const labels = [
+          link.textContent,
+          link.getAttribute("title"),
+          link.getAttribute("aria-label"),
+        ].filter(Boolean).map((value) => value.replace(/\s+/g, " ").trim());
+        const text = labels.filter((value) => regex.test(value)).sort((a, b) => a.length - b.length)[0] || "";
+        const script = [link.getAttribute("href") || "", link.getAttribute("onclick") || ""]
+          .join(";").replace(/^javascript:/i, "");
+        return { link, text, script };
+      }).filter(({ text, script }) => text && (!scriptRegex || scriptRegex.test(script)))
+        .sort((left, right) => left.text.length - right.text.length);
+
+      const script = candidates[0]?.script;
+      if (!script || !/set(DataAndNextPage|Field|NextPage)/i.test(script)) return false;
+
+      for (const match of script.matchAll(/setField\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\)/g)) {
+        setFormValue(match[1], decodeHtml(match[2]));
+      }
+
+      const oneData = script.match(
+        /setDataAndNextPageOneDataValue\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]+)['"]\)/
+      );
+      if (oneData) {
+        setFormValue(oneData[1], decodeHtml(oneData[2]));
+        setFormValue("NEXT_PAGE", oneData[3]);
+        submitForm();
+        return true;
+      }
+
+      const dataAndNext = script.match(
+        /setDataAndNextPage\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]\s*,\s*['"]([^'"]+)['"]\)/
+      );
+      if (dataAndNext) {
+        setFormValue(dataAndNext[1], decodeHtml(dataAndNext[2]));
+        setFormValue("NEXT_PAGE", dataAndNext[3]);
+        submitForm();
+        return true;
+      }
+
+      const next = script.match(/setNextPage\(['"]([^'"]+)['"]\)/);
+      if (next) {
+        setFormValue("NEXT_PAGE", next[1]);
+        submitForm();
+        return true;
+      }
+      return false;
+
+      function setFormValue(name, value) {
+        let field = form.elements[name];
+        if (field && field.length && field.tagName === undefined) field = field[0];
+        if (!field) {
+          field = document.createElement("input");
+          field.type = "hidden";
+          field.name = name;
+          form.appendChild(field);
+        }
+        field.value = value;
+      }
+
+      function submitForm() {
+        if (form.elements.PAGE_LOADED_FLAG) form.elements.PAGE_LOADED_FLAG.value = "N";
+        if (window.getPostParams) window.getPostParams();
+        form.target = "";
+        HTMLFormElement.prototype.submit.call(form);
+      }
+
+      function decodeHtml(value) {
+        const textarea = document.createElement("textarea");
+        textarea.innerHTML = value;
+        return textarea.value;
+      }
+    }, {
+      source: pattern.source,
+      scriptSource: scriptPattern ? scriptPattern.source : "",
+    });
+  } catch (error) {
+    submitted = /execution context|navigation|destroyed/i.test(error.message || "");
+  }
+
+  if (!submitted) return false;
+  await waitForNavigation(page, 15_000);
+  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+  return true;
 }
 
 async function openReviewerArticle(
@@ -1029,9 +1520,14 @@ export async function readReviewerPage(page) {
       const row = input.closest("tr");
       const cells = Array.from(row?.children || []).filter((element) => element.tagName === "TD");
       const nameCell = cells[1];
-      const name = Array.from(nameCell?.querySelectorAll("a") || [])
+      const linkedName = Array.from(nameCell?.querySelectorAll("a") || [])
         .map((link) => clean(link.textContent))
         .find((text) => text && !/^(proxy|grant an extension|invite again|rescind|edit reminders)$/i.test(text)) || null;
+      const plainTextName = String(nameCell?.innerText || nameCell?.textContent || "")
+        .split(/\r?\n/)
+        .map(clean)
+        .find((text) => text && !/^(proxy|grant an extension|invite again|rescind|edit reminders)$/i.test(text)) || null;
+      const name = linkedName || plainTextName;
       const rowText = clean(row?.innerText || row?.textContent);
       return {
         id: input.getAttribute("value") || input.getAttribute("name"),
@@ -1125,18 +1621,23 @@ async function addReviewersToTarget(page, { target, initialReviewers, log }) {
     }
     try {
       await addCandidate(page, candidate, log);
+      reviewers = await confirmCandidateAdded(page, candidate, reviewers, log);
     } catch (error) {
       if (!isReviewerCandidateSkipped(error)) throw error;
+      if (Array.isArray(error.reviewers)) {
+        reviewers = error.reviewers;
+        count = countReviewersTowardTarget(reviewers);
+      }
       skipped.push(candidate);
       await log("candidate_skipped", {
         candidate: publicPerson(candidate),
         reason: error.reason,
         similarAccounts: error.similarAccounts?.map(publicPerson) || [],
+        confirmation: error.confirmation || null,
         skipped: skipped.length,
       });
       continue;
     }
-    reviewers = await confirmCandidateAdded(page, candidate, log);
     added.push(candidate);
     const nextCount = countReviewersTowardTarget(reviewers);
     if (nextCount <= count) {
@@ -1235,26 +1736,43 @@ async function addCandidate(page, candidate, log) {
     try {
       await waitForReviewerArticle(page, 15_000);
     } catch (error) {
-      await log("reviewer_article_reload_after_create_account", {
+      await log("reviewer_article_refresh_after_create_account", {
         candidate: publicPerson(candidate),
         reason: error.message,
         url: page.url(),
       });
-      await page.reload({ waitUntil: "domcontentloaded", timeout: 30_000 });
-      await waitForReviewerArticle(page, 20_000);
+      if (!(await refreshCurrentReviewerTask(page, log, "create_account_parent_not_ready"))) {
+        throw error;
+      }
     }
     if (popupError) throw popupError;
   } else {
-    const navigation = waitForNavigation(page, 15_000);
+    const navigation = page.waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: 20_000,
+    }).then(() => true).catch(() => false);
     await locator.click();
-    await navigation;
+    const navigated = await navigation;
+    await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => undefined);
+    await log("candidate_add_navigation_finished", {
+      candidate: publicPerson(candidate),
+      navigated,
+      url: page.url(),
+    });
   }
   await log("candidate_add_action_finished", { candidate: publicPerson(candidate), url: page.url() });
 }
 
 async function handleCreateAccountPopup(popup, candidate, log) {
   await popup.waitForLoadState("domcontentloaded");
-  await popup.waitForSelector(REVIEWER_SELECTORS.createAndAdd, { timeout: 15_000 });
+  const createAndAdd = popup.locator(REVIEWER_SELECTORS.createAndAdd);
+  await createAndAdd.waitFor({ state: "visible", timeout: 15_000 });
+  const createAndAddCount = await createAndAdd.count();
+  if (createAndAddCount !== 1) {
+    throw new Error(
+      `Oczekiwano jednego widocznego Create and Add dla ${candidate.name}, znaleziono ${createAndAddCount}.`
+    );
+  }
   const popupPerson = {
     name: [
       await popup.locator("input[name='PERSON_FIRSTNAME']").inputValue().catch(() => ""),
@@ -1268,15 +1786,44 @@ async function handleCreateAccountPopup(popup, candidate, log) {
   await log("create_account_popup_opened", { candidate: publicPerson(candidate), popupPerson });
 
   const navigation = waitForNavigation(popup, 12_000);
-  await popup.locator(REVIEWER_SELECTORS.createAndAdd).first().click();
+  await createAndAdd.click();
   await navigation;
   await log("create_and_add_clicked", { candidate: publicPerson(candidate), popupClosed: popup.isClosed() });
 
   const deadline = Date.now() + 30_000;
   let existingEmailConfirmationAttempted = false;
   while (!popup.isClosed() && Date.now() < deadline) {
-    const existingEmailConflict = await readExistingEmailConflict(popup, candidate);
+    const popupBodyText = await popup.locator("body").innerText().catch(() => "");
+    const blockingReason = createAccountBlockingReason(popupBodyText);
+    if (blockingReason) {
+      await log("create_account_blocked", {
+        candidate: publicPerson(candidate),
+        reason: blockingReason,
+        message: popupBodyText.replace(/\s+/g, " ").trim().slice(0, 500),
+      });
+      const closed = await popup.close().then(() => true).catch(() => popup.isClosed());
+      if (!closed && !popup.isClosed()) {
+        throw new Error(`Nie udało się zamknąć zablokowanego popupu dla ${candidate.name}.`);
+      }
+      const error = new Error(
+        `Pomijam ${candidate.name}/${candidate.email}: ScholarOne wymaga administracyjnego scalenia zduplikowanych kont.`
+      );
+      error.code = "REVIEWER_CANDIDATE_SKIPPED";
+      error.reason = blockingReason;
+      throw error;
+    }
+
+    const existingEmailConflict = await readExistingEmailConflict(popup, candidate, {
+      controlVisibilityTimeout: 5_000,
+    });
     if (existingEmailConflict) {
+      await log("existing_email_conflict_detected", {
+        candidate: publicPerson(candidate),
+        email: existingEmailConflict.email,
+        emailMatches: existingEmailConflict.emailMatches,
+        controlCount: existingEmailConflict.controlCount,
+        controlVisible: existingEmailConflict.controlVisible,
+      });
       if (!existingEmailConflict.emailMatches) {
         throw new Error(
           `ScholarOne zgłasza istniejący e-mail ${existingEmailConflict.email}, który nie odpowiada ${candidate.email}.`
@@ -1287,7 +1834,8 @@ async function handleCreateAccountPopup(popup, candidate, log) {
       }
       if (existingEmailConflict.controlCount !== 1 || !existingEmailConflict.controlVisible) {
         throw new Error(
-          `Oczekiwano jednego widocznego Save and Add dla istniejącego konta ${candidate.name}, znaleziono ${existingEmailConflict.controlCount}.`
+          `Oczekiwano jednego widocznego Save and Add dla istniejącego konta ${candidate.name}; ` +
+          `znaleziono ${existingEmailConflict.controlCount}, widocznych ${existingEmailConflict.controlVisible ? 1 : 0}.`
         );
       }
 
@@ -1353,6 +1901,13 @@ async function handleCreateAccountPopup(popup, candidate, log) {
   await log("create_account_popup_closed", { candidate: publicPerson(candidate) });
 }
 
+export function createAccountBlockingReason(bodyText) {
+  const text = String(bodyText || "").replace(/\s+/g, " ").trim();
+  const duplicatePeople = /duplicate\s+people\s+in\s+the\s+system\s+exist\s+with\s+this\s+e-?mail\s+address/i.test(text);
+  const mergeRequired = /(?:user\s+)?administration\s*\/\s*merge\s+tools/i.test(text);
+  return duplicatePeople && mergeRequired ? "duplicate_people_merge_required" : null;
+}
+
 export function findMatchingSimilarAccount(candidate, similarAccounts) {
   const candidateEmail = String(candidate?.email || "").trim().toLowerCase();
   if (candidateEmail) {
@@ -1363,7 +1918,9 @@ export function findMatchingSimilarAccount(candidate, similarAccounts) {
   return similarAccounts.find((account) => samePerson(candidate, account)) || null;
 }
 
-export async function readExistingEmailConflict(popup, candidate) {
+export async function readExistingEmailConflict(popup, candidate, {
+  controlVisibilityTimeout = 0,
+} = {}) {
   if (popup.isClosed()) return null;
   const warningVisible = await popup.locator("body").innerText()
     .then((text) => /person with this e-?mail address already exists in the system/i.test(text))
@@ -1373,7 +1930,14 @@ export async function readExistingEmailConflict(popup, candidate) {
   const email = await popup.locator("input[name='EMAIL_ADDRESS']").inputValue().catch(() => "");
   const candidateEmail = String(candidate?.email || "").trim().toLowerCase();
   const control = popup.locator(REVIEWER_SELECTORS.existingEmailSaveAndAdd);
-  const controlCount = await control.count();
+  if (controlVisibilityTimeout > 0) {
+    await control.waitFor({
+      state: "visible",
+      timeout: controlVisibilityTimeout,
+    }).catch(() => undefined);
+  }
+  if (popup.isClosed()) return null;
+  const controlCount = await control.count().catch(() => 0);
   const controlVisible = controlCount === 1 && await control.isVisible().catch(() => false);
   return {
     email,
@@ -1398,9 +1962,10 @@ async function readPopupAddOptions(popup) {
   }, REVIEWER_SELECTORS.candidateAdd).catch(() => []);
 }
 
-async function confirmCandidateAdded(page, candidate, log) {
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
-    const reviewers = await readAllReviewerList(page, log);
+async function confirmCandidateAdded(page, candidate, beforeReviewers, log) {
+  let reviewers = beforeReviewers;
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    reviewers = await readAllReviewerList(page, log);
     const match = reviewers.find((reviewer) => samePerson(candidate, reviewer));
     if (match) {
       await log("candidate_confirmed_in_reviewer_list", {
@@ -1410,9 +1975,55 @@ async function confirmCandidateAdded(page, candidate, log) {
       });
       return reviewers;
     }
-    await page.waitForTimeout(1000);
+    if (attempt === 3 || attempt === 6) {
+      await log("candidate_confirmation_refresh_started", {
+        attempt,
+        candidate: publicPerson(candidate),
+        url: page.url(),
+      });
+      await refreshCurrentReviewerTask(page, log, "candidate_confirmation");
+    } else {
+      await page.waitForTimeout(1500);
+    }
   }
-  throw new Error(`${candidate.name} nie pojawił się w Reviewer List po Add.`);
+
+  const confirmation = candidateAddConfirmationState(beforeReviewers, reviewers);
+  await log("candidate_add_not_confirmed", {
+    candidate: publicPerson(candidate),
+    ...confirmation,
+  });
+  if (confirmation.rosterUnchanged) {
+    const error = new Error(
+      `Pomijam ${candidate.name}: ScholarOne zamknął Add, ale Reviewer List pozostała bez zmian.`
+    );
+    error.code = "REVIEWER_CANDIDATE_SKIPPED";
+    error.reason = "candidate_not_added";
+    error.reviewers = reviewers;
+    error.confirmation = confirmation;
+    throw error;
+  }
+
+  throw new Error(
+    `${candidate.name} nie został jednoznacznie rozpoznany po Add, a skład Reviewer List zmienił się ` +
+    `(${confirmation.beforeTotal} → ${confirmation.afterTotal}). Zatrzymuję skrypt, aby nie dodać nadmiarowego recenzenta.`
+  );
+}
+
+export function candidateAddConfirmationState(beforeReviewers, afterReviewers) {
+  const before = Array.isArray(beforeReviewers) ? beforeReviewers : [];
+  const after = Array.isArray(afterReviewers) ? afterReviewers : [];
+  const sameRoster = before.length === after.length && before.every((previous) =>
+    after.some((current) =>
+      Boolean(previous?.id && current?.id && previous.id === current.id) || samePerson(previous, current)
+    )
+  );
+  return {
+    rosterUnchanged: sameRoster,
+    beforeTotal: before.length,
+    afterTotal: after.length,
+    beforeCountTowardTarget: countReviewersTowardTarget(before),
+    afterCountTowardTarget: countReviewersTowardTarget(after),
+  };
 }
 
 async function openInviteAllPopup(page, log) {
@@ -1571,8 +2182,10 @@ async function readPagination(page, selector) {
   }, selector);
 }
 
-async function currentPaginationValue(page, selector) {
-  return page.locator(selector).first().inputValue().catch(() => null);
+export async function currentPaginationValue(page, selector) {
+  const locator = page.locator(selector).first();
+  if (!(await locator.count())) return null;
+  return locator.inputValue({ timeout: 1_000 }).catch(() => null);
 }
 
 async function navigatePagination(page, selector, value) {

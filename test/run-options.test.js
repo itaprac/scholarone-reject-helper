@@ -94,6 +94,44 @@ test("safe reviewer preparation cannot silently become a batch", () => {
   }, "reviewers-prepare"), /jeden manuskrypt/);
 });
 
+test("validates Codex-backed initial assessment options", () => {
+  assert.doesNotThrow(() => validateRunOptions({
+    screeningStartUrl: "https://mc.manuscriptcentral.com/kes",
+    screeningMaxChecked: "10",
+    screeningSlowMo: "0",
+    assessmentTimeoutSeconds: "120",
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"));
+
+  assertBadRequest(() => validateRunOptions({
+    screeningMaxChecked: "0",
+  }, "screening"), /screeningMaxChecked/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentTimeoutSeconds: "5",
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"), /assessmentTimeoutSeconds/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "  ",
+  }, "screening"), /Prompt oceny LLM/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "extreme",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"), /assessmentReasoningEffort/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+    screeningLive: true,
+    screeningRejectMessage: "  ",
+  }, "screening"), /Wiadomość Reject/);
+});
+
 function assertBadRequest(callback, messagePattern) {
   assert.throws(callback, (error) => {
     assert.equal(error.statusCode, 400);
