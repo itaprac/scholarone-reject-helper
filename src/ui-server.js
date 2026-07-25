@@ -14,6 +14,7 @@ import {
 } from "./assessment-config.js";
 import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
+import { REVIEWER_QUEUES, UI_DEFAULTS } from "./config/defaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -191,27 +192,27 @@ async function publicConfig() {
   return {
     settingsPath: relativeProjectPath(settingsPath),
     settingsSaved: fs.existsSync(settingsPath),
-    startUrl: saved.startUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
-    maxChecked: saved.maxChecked ?? envValue("MAX_CHECKED", "50"),
-    submittedOlderThanDays: saved.submittedOlderThanDays ?? envValue("SUBMITTED_OLDER_THAN_DAYS", "30"),
+    startUrl: saved.startUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
+    maxChecked: saved.maxChecked ?? envValue("MAX_CHECKED", String(UI_DEFAULTS.maxChecked)),
+    submittedOlderThanDays: saved.submittedOlderThanDays ?? envValue("SUBMITTED_OLDER_THAN_DAYS", String(UI_DEFAULTS.submittedOlderThanDays)),
     queueStartPage: saved.queueStartPage ?? envValue("QUEUE_START_PAGE", ""),
-    slowMo: saved.slowMo ?? envValue("SLOW_MO", "500"),
+    slowMo: saved.slowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
     maxRejected: saved.maxRejected ?? envValue("MAX_REJECTED", ""),
     keepOpen: saved.keepOpen ?? parseBool(envValue("KEEP_OPEN", ""), false),
     rejectMessage: saved.rejectMessage ?? loadRejectMessage(),
-    reviewerStartUrl: saved.reviewerStartUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
-    reviewerQueue: ["combined", "select", "invite"].includes(saved.reviewerQueue)
+    reviewerStartUrl: saved.reviewerStartUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
+    reviewerQueue: REVIEWER_QUEUES.includes(saved.reviewerQueue)
       ? saved.reviewerQueue
-      : "combined",
-    reviewersPerPaper: saved.reviewersPerPaper ?? envValue("REVIEWERS_PER_PAPER", "10"),
-    reviewerMaxManuscripts: saved.reviewerMaxManuscripts ?? "3",
-    reviewerSlowMo: saved.reviewerSlowMo ?? envValue("SLOW_MO", "500"),
-    reviewerRefreshWaitSeconds: saved.reviewerRefreshWaitSeconds ?? envValue("REVIEWER_REFRESH_WAIT_SECONDS", "60"),
+      : UI_DEFAULTS.reviewerQueue,
+    reviewersPerPaper: saved.reviewersPerPaper ?? envValue("REVIEWERS_PER_PAPER", String(UI_DEFAULTS.reviewersPerPaper)),
+    reviewerMaxManuscripts: saved.reviewerMaxManuscripts ?? String(UI_DEFAULTS.reviewerMaxManuscripts),
+    reviewerSlowMo: saved.reviewerSlowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
+    reviewerRefreshWaitSeconds: saved.reviewerRefreshWaitSeconds ?? envValue("REVIEWER_REFRESH_WAIT_SECONDS", String(UI_DEFAULTS.reviewerRefreshWaitSeconds)),
     reviewerKeepOpen: saved.reviewerKeepOpen ?? false,
-    screeningStartUrl: saved.screeningStartUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
-    screeningMaxChecked: saved.screeningMaxChecked ?? "10",
+    screeningStartUrl: saved.screeningStartUrl ?? envValue("START_URL", UI_DEFAULTS.startUrl),
+    screeningMaxChecked: saved.screeningMaxChecked ?? String(UI_DEFAULTS.screeningMaxChecked),
     screeningScanAll: saved.screeningScanAll ?? true,
-    screeningSlowMo: saved.screeningSlowMo ?? envValue("SLOW_MO", "500"),
+    screeningSlowMo: saved.screeningSlowMo ?? envValue("SLOW_MO", String(UI_DEFAULTS.slowMo)),
     screeningKeepOpen: false,
     assessmentModel: String(
       saved.assessmentModel ||
@@ -222,7 +223,7 @@ async function publicConfig() {
       saved.assessmentReasoningEffort ??
       envValue("ASSESSMENT_REASONING_EFFORT", DEFAULT_ASSESSMENT_REASONING_EFFORT)
     ),
-    assessmentTimeoutSeconds: saved.assessmentTimeoutSeconds ?? envValue("ASSESSMENT_TIMEOUT_SECONDS", "120"),
+    assessmentTimeoutSeconds: saved.assessmentTimeoutSeconds ?? envValue("ASSESSMENT_TIMEOUT_SECONDS", String(UI_DEFAULTS.assessmentTimeoutSeconds)),
     assessmentPrompt: saved.assessmentPrompt ?? envValue("ASSESSMENT_PROMPT", DEFAULT_ASSESSMENT_PROMPT).replace(/\\n/g, "\n"),
     screeningRejectMessage: saved.screeningRejectMessage ??
       envValue("SCREENING_REJECT_MESSAGE", DEFAULT_SCREENING_REJECT_MESSAGE).replace(/\\n/g, "\n"),
@@ -240,9 +241,9 @@ async function saveUiSettings(body) {
     keepOpen: Boolean(body.keepOpen),
     rejectMessage: String(body.rejectMessage || "").trimEnd(),
     reviewerStartUrl: String(body.reviewerStartUrl || "").trim(),
-    reviewerQueue: ["combined", "select", "invite"].includes(body.reviewerQueue)
+    reviewerQueue: REVIEWER_QUEUES.includes(body.reviewerQueue)
       ? body.reviewerQueue
-      : "combined",
+      : UI_DEFAULTS.reviewerQueue,
     reviewersPerPaper: normalizeIntegerSetting(body.reviewersPerPaper, "10"),
     reviewerMaxManuscripts: normalizeIntegerSetting(body.reviewerMaxManuscripts, "3"),
     reviewerSlowMo: normalizeIntegerSetting(body.reviewerSlowMo, "500", 0),
@@ -263,7 +264,7 @@ async function saveUiSettings(body) {
   };
 
   if (!settings.startUrl) {
-    settings.startUrl = "https://mc.manuscriptcentral.com/kes";
+    settings.startUrl = UI_DEFAULTS.startUrl;
   }
   if (!settings.rejectMessage) {
     settings.rejectMessage = loadRejectMessage();

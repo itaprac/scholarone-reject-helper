@@ -10,9 +10,13 @@ import {
   waitForReviewerArticleIdentity,
 } from "../src/select-reviewers.js";
 
-const reviewerArticleSnapshot = "/Users/itaprac/Downloads/Invite_R.html";
-const selectQueueSnapshot = "/Users/itaprac/Downloads/Select_reviewers_list.html";
-const adminCenterSnapshot = "/Users/itaprac/Downloads/admin_center.html";
+import { externalSnapshot, fixturePath } from "./fixtures.js";
+
+// Invite_R.html nie zachował się przy przenoszeniu snapshotów do repo. Test go
+// użyje, jeśli wskażesz katalog przez SCHOLARONE_HTML_DIR.
+const reviewerArticleSnapshot = externalSnapshot("Invite_R.html");
+const selectQueueSnapshot = fixturePath("queue");
+const adminCenterSnapshot = fixturePath("admin");
 
 test("recognizes the ScholarOne login screen that appeared after Invite All", async () => {
   const browser = await chromium.launch({ headless: true });
@@ -108,19 +112,25 @@ test("reads a reviewer whose removed account name is plain text instead of a lin
   }
 });
 
-test("recognizes reviewer details and Admin Center snapshots", {
-  skip: fs.existsSync(reviewerArticleSnapshot) && fs.existsSync(adminCenterSnapshot)
-    ? false
-    : "Brak snapshotów Invite_R.html/admin_center.html",
+test("recognizes the Admin Center snapshot", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  try {
+    await page.goto(pathToFileURL(adminCenterSnapshot).href, { waitUntil: "load" });
+    assert.equal(await detectReviewerPageState(page), "admin_center");
+  } finally {
+    await browser.close();
+  }
+});
+
+test("recognizes the reviewer details snapshot", {
+  skip: reviewerArticleSnapshot ? false : "Brak snapshotu Invite_R.html (podaj SCHOLARONE_HTML_DIR)",
 }, async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
     await page.goto(pathToFileURL(reviewerArticleSnapshot).href, { waitUntil: "load" });
     assert.equal(await detectReviewerPageState(page), "reviewer_article");
-
-    await page.goto(pathToFileURL(adminCenterSnapshot).href, { waitUntil: "load" });
-    assert.equal(await detectReviewerPageState(page), "admin_center");
   } finally {
     await browser.close();
   }

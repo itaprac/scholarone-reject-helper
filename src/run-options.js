@@ -2,6 +2,7 @@ import {
   ASSESSMENT_REASONING_EFFORTS,
   DEFAULT_ASSESSMENT_REASONING_EFFORT,
 } from "./assessment-config.js";
+import { REVIEWER_QUEUES } from "./config/defaults.js";
 
 const MODE_FIELDS = {
   dryrun: [
@@ -59,7 +60,7 @@ export function validateRunOptions(body, mode) {
   }
 
   if (mode.startsWith("reviewers-")) {
-    if (!["combined", "select", "invite"].includes(body.reviewerQueue)) {
+    if (!REVIEWER_QUEUES.includes(body.reviewerQueue)) {
       throw badRequest("reviewerQueue musi wskazywać Combined, Select Reviewers albo Invite Reviewers.");
     }
     if (mode === "reviewers-prepare" && Number(body.reviewerMaxManuscripts || 1) !== 1) {

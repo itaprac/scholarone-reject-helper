@@ -3,9 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "install-browsers": "playwright install chromium",
     "test": "node --test",
+    "lint": "eslint .",
+    "check": "npm run lint && npm test",
+    "logs:prune": "node scripts/prune-logs.js",
+    "fixtures:check": "node scripts/anonymize-fixtures.js --check",
     "ui": "node src/ui-server.js",
     "dryrun": "node src/auto-reject.js --headed --dry-run",
     "reject": "node src/auto-reject.js --headed --save-and-send",
@@ -22,5 +29,8 @@
   },
   "dependencies": {
     "playwright": "^1.55.0"
+  },
+  "devDependencies": {
+    "eslint": "^10.8.0"
   }
 }

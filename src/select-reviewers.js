@@ -14,6 +14,9 @@ import {
 import { REVIEWER_SELECTORS } from "./reviewer-selectors.js";
 import { isRevisionManuscriptId } from "./manuscript-rules.js";
 import { hasUnusualActivityAlert } from "./screening-metadata.js";
+import { createScreenshotWriter } from "./core/screenshots.js";
+import { pruneLogs } from "./core/log-retention.js";
+import { DEFAULTS } from "./config/defaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -29,6 +32,11 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
   const log = createLogger(logFile);
 
   await fsp.mkdir(screenshotDir, { recursive: true });
+  const screenshots = createScreenshotWriter({
+    directory: screenshotDir,
+    debug: config.debugScreenshots,
+  });
+  await pruneLogs({ logsDir: config.logsDir }).catch(() => undefined);
   await log("run_started", publicConfig(config));
 
   const session = await createBrowserSession(config);
@@ -61,7 +69,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           config,
           log,
           logFile,
-          screenshotDir,
+          screenshots,
           batchIndex,
           excludedManuscriptIds: [
             ...deferredReviewers.map(({ manuscriptId }) => manuscriptId),
@@ -117,7 +125,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
         config,
         log,
         logFile,
-        screenshotDir,
+        screenshots,
         batchIndex: pending.batchIndex,
         pending,
       });
@@ -149,7 +157,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
     console.log(JSON.stringify(result, null, 2));
     return result;
   } catch (error) {
-    const screenshot = await saveScreenshot(page, screenshotDir, `error-${batchIndex || 1}`);
+    const screenshot = await screenshots.error(page, `error-${batchIndex || 1}`);
     await log("run_failed", {
       message: error.message,
       stack: error.stack,
@@ -368,7 +376,7 @@ async function runOneReviewerManuscript(page, {
   config,
   log,
   logFile,
-  screenshotDir,
+  screenshots,
   batchIndex,
   queueLabel,
   targetManuscriptId = null,
@@ -485,9 +493,9 @@ async function runOneReviewerManuscript(page, {
 
     stage = "opening_invite_popup";
     const invitePopup = await openInviteAllPopup(page, log);
-    const popupScreenshot = await saveScreenshot(
+    // Dowód stanu popupu tuż przed nieodwracalną wysyłką — zawsze na dysk.
+    const popupScreenshot = await screenshots.proof(
       invitePopup,
-      screenshotDir,
       `before-final-invite-all-${batchIndex}`
     );
 
@@ -702,7 +710,7 @@ function buildConfig(args, env, credentials) {
   ).trim().toLowerCase();
   reviewerQueueLabels(reviewerQueueMode);
   const config = {
-    startUrl: args["start-url"] || env.START_URL || "https://mc.manuscriptcentral.com/kes",
+    startUrl: args["start-url"] || env.START_URL || DEFAULTS.startUrl,
     reviewersPerPaper: positiveInteger(
       args["reviewers-per-paper"] || env.REVIEWERS_PER_PAPER,
       10,
@@ -723,6 +731,7 @@ function buildConfig(args, env, credentials) {
       "--refresh-wait-seconds"
     ) * 1000,
     keepOpen: parseBool(args["keep-open"] ?? env.KEEP_OPEN, false),
+    debugScreenshots: parseBool(args["debug-screenshots"] ?? env.DEBUG_SCREENSHOTS, false),
     autoLogin: parseBool(
       args["auto-login"] ?? env.AUTO_LOGIN,
       Boolean(credentials.username && credentials.password)
@@ -2283,13 +2292,6 @@ function createLogger(logFile) {
     await fsp.appendFile(logFile, `${JSON.stringify(entry)}\n`, "utf8");
     console.log(`[select-reviewers] ${type} ${JSON.stringify(payload)}`);
   };
-}
-
-async function saveScreenshot(page, directory, name) {
-  const target = path.join(directory, `${name.replace(/[^a-z0-9-]+/gi, "-")}.png`);
-  if (!page || page.isClosed()) return null;
-  await page.screenshot({ path: target, fullPage: true }).catch(() => undefined);
-  return target;
 }
 
 function parseArgs(rawArgs) {

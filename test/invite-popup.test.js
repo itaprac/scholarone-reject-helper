@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import { extractPopWindowTarget } from "../src/select-reviewers.js";
 import { REVIEWER_SELECTORS } from "../src/reviewer-selectors.js";
+import { fixturePath, readFixture } from "./fixtures.js";
 
-const finalInvitePopupFile = "/Users/itaprac/Downloads/ivniteall_popup.html";
+const finalInvitePopupFile = fixturePath("invitePopup");
 
 test("extracts the first Invite All URL from ScholarOne popWindow markup", () => {
-  const html = fs.readFileSync("/Users/itaprac/Downloads/invite_all_first.html", "utf8");
+  const html = readFixture("firstInviteAll");
   const href = html.match(/href="([^"]*invite_all_popup[^"]+)"/i)?.[1]
     ?.replaceAll("&#39;", "'")
     .replaceAll("&amp;", "&");
@@ -26,9 +26,7 @@ test("decodes escaped separators in a popWindow URL", () => {
   );
 });
 
-test("the final Invite All accepts ScholarOne confirmation and invokes the mass-invite action", {
-  skip: fs.existsSync(finalInvitePopupFile) ? false : `Brak snapshotu: ${finalInvitePopupFile}`,
-}, async () => {
+test("the final Invite All accepts ScholarOne confirmation and invokes the mass-invite action", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {

@@ -32,18 +32,12 @@ import {
   approveAndAssignEditors,
   DEFAULT_EDITOR_NAME,
 } from "./screening-approval.js";
+import { createScreenshotWriter } from "./core/screenshots.js";
+import { pruneLogs } from "./core/log-retention.js";
+import { DEFAULTS } from "./config/defaults.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
-
-const DEFAULTS = {
-  startUrl: "https://mc.manuscriptcentral.com/kes",
-  maxChecked: 10,
-  submittedOlderThanDays: 30,
-  headless: false,
-  profileDir: path.join(projectRoot, "playwright-profile"),
-  logsDir: path.join(projectRoot, "logs"),
-};
 
 const args = parseArgs(process.argv.slice(2));
 const env = loadEnvFile(path.join(projectRoot, ".env"));
@@ -71,6 +65,7 @@ const config = {
   saveAndSend: parseBool(args["save-and-send"] ?? env.SAVE_AND_SEND, false),
   maxRejected: toOptionalPositiveInteger(args["max-rejected"] || env.MAX_REJECTED),
   keepOpen: parseBool(args["keep-open"] ?? env.KEEP_OPEN, false),
+  debugScreenshots: parseBool(args["debug-screenshots"] ?? env.DEBUG_SCREENSHOTS, false),
   autoLogin: parseBool(args["auto-login"] ?? env.AUTO_LOGIN, Boolean(loginCredentials.username && loginCredentials.password)),
   loginUsername: loginCredentials.username,
   loginPassword: loginCredentials.password,
@@ -135,6 +130,15 @@ const reportDir = path.join(config.logsDir, "reports");
 await fsp.mkdir(screenshotDir, { recursive: true });
 await fsp.mkdir(reportDir, { recursive: true });
 
+const screenshots = createScreenshotWriter({
+  directory: screenshotDir,
+  debug: config.debugScreenshots,
+});
+
+// Czyszczenie startowe jest best-effort: nieudane sprzątanie nie ma prawa
+// zablokować przebiegu.
+await pruneLogs({ logsDir: config.logsDir }).catch(() => undefined);
+
 const browserSession = await createBrowserSession();
 const { page } = browserSession;
 page.setDefaultTimeout(15000);
@@ -197,7 +201,7 @@ try {
   await logEvent("run_finished", result);
   console.log(JSON.stringify(result, null, 2));
 } catch (error) {
-  const screenshot = await saveScreenshot(page, "error");
+  const screenshot = await screenshots.error(page, "error");
   await logEvent("run_failed", {
     message: error.message,
     stack: error.stack,
@@ -302,7 +306,7 @@ async function runMetadataCollection(page) {
       title: summary.title,
       abstract,
     };
-    const screenshot = await saveScreenshot(page, `metadata-${summary.manuscriptId}`);
+    const screenshot = await screenshots.step(page, `metadata-${summary.manuscriptId}`);
 
     await logEvent("metadata_collected", {
       checked,
@@ -390,7 +394,7 @@ async function runMetadataCollection(page) {
       console.log(`[LIVE ACTION] ${summary.manuscriptId}: wykonuję ${assessment.decision} w ScholarOne...`);
       try {
         decisionAction = await applyLiveAssessmentDecision(page, assessment);
-        decisionAction.screenshot = await saveScreenshot(
+        decisionAction.screenshot = await screenshots.proof(
           page,
           `live-action-complete-${assessment.decision.toLowerCase()}-${summary.manuscriptId}`
         );
@@ -402,7 +406,7 @@ async function runMetadataCollection(page) {
         });
         console.log(`[LIVE ACTION COMPLETE] ${summary.manuscriptId}: ${assessment.decision}.`);
       } catch (error) {
-        const actionScreenshot = await saveScreenshot(page, `live-action-error-${summary.manuscriptId}`);
+        const actionScreenshot = await screenshots.error(page, `live-action-error-${summary.manuscriptId}`);
         actionError = {
           decision: assessment.decision,
           message: error.message,
@@ -588,7 +592,7 @@ async function runScan(page) {
       }
 
       if (config.stopAfterQueue) {
-        const screenshot = await saveScreenshot(page, "queue-ready");
+        const screenshot = await screenshots.step(page, "queue-ready");
         return {
           status: "queue_ready",
           checked,
@@ -679,7 +683,7 @@ async function runScan(page) {
     }
 
     if (details.action !== "candidate") {
-      const screenshot = await saveScreenshot(page, `needs-review-${checked}`);
+      const screenshot = await screenshots.error(page, `needs-review-${checked}`);
       return {
         status: "needs_manual_review",
         checked,
@@ -718,7 +722,7 @@ async function runScan(page) {
     const checklistResult = await clickCompleteChecklist(page);
 
     if (!config.clickReject) {
-      const screenshot = await saveScreenshot(page, `candidate-before-reject-${checked}`);
+      const screenshot = await screenshots.step(page, `candidate-before-reject-${checked}`);
 
       await logEvent("stopped_before_reject", {
         rowIndex: checked - 1,
@@ -743,7 +747,7 @@ async function runScan(page) {
     const { emailPage, ...rejectEmailResult } = rejectEmailResultWithPage;
 
     if (!rejectEmailResult.clicked || !rejectEmailResult.emailBodyFilled) {
-      const screenshot = await saveScreenshot(emailPage || page, `candidate-reject-step-failed-${checked}`);
+      const screenshot = await screenshots.error(emailPage || page, `candidate-reject-step-failed-${checked}`);
 
       await logEvent("reject_step_failed", {
         rowIndex: checked - 1,
@@ -767,7 +771,7 @@ async function runScan(page) {
     }
 
     if (!config.saveAndSend) {
-      const screenshot = await saveScreenshot(emailPage || page, `candidate-email-filled-${checked}`);
+      const screenshot = await screenshots.step(emailPage || page, `candidate-email-filled-${checked}`);
 
       await logEvent("stopped_before_send", {
         rowIndex: checked - 1,
@@ -791,7 +795,7 @@ async function runScan(page) {
     }
 
     if (hasMaxRejectedLimit() && rejected >= config.maxRejected) {
-      const screenshot = await saveScreenshot(emailPage || page, `candidate-max-rejected-reached-${checked}`);
+      const screenshot = await screenshots.step(emailPage || page, `candidate-max-rejected-reached-${checked}`);
 
       return {
         status: "max_rejected_reached_before_send",
@@ -808,7 +812,7 @@ async function runScan(page) {
 
     const sendResult = await clickSaveAndSend(emailPage, page);
     if (!sendResult.sent) {
-      const screenshot = await saveScreenshot(sendResult.emailPageClosed ? page : emailPage || page, `candidate-save-send-failed-${checked}`);
+      const screenshot = await screenshots.error(sendResult.emailPageClosed ? page : emailPage || page, `candidate-save-send-failed-${checked}`);
 
       await logEvent("save_send_failed", {
         rowIndex: checked - 1,
@@ -834,7 +838,7 @@ async function runScan(page) {
     }
 
     rejected += 1;
-    const screenshot = await saveScreenshot(page, `candidate-sent-${checked}`);
+    const screenshot = await screenshots.proof(page, `candidate-sent-${checked}`);
 
     await logEvent("candidate_rejected_and_sent", {
       rowIndex: checked - 1,
@@ -1028,7 +1032,7 @@ async function runRejectTargetsFromSearch(page) {
 
     const checklistResult = await clickCompleteChecklist(page);
     if (isNoRejectControlChecklistResult(checklistResult)) {
-      const screenshot = await saveScreenshot(page, `search-not-actionable-no-reject-${checked}`);
+      const screenshot = await screenshots.step(page, `search-not-actionable-no-reject-${checked}`);
       const resultEntry = {
         manuscriptId,
         status: "not_actionable_no_reject_control",
@@ -1056,7 +1060,7 @@ async function runRejectTargetsFromSearch(page) {
     }
 
     if (!config.clickReject) {
-      const screenshot = await saveScreenshot(page, `search-candidate-before-reject-${checked}`);
+      const screenshot = await screenshots.step(page, `search-candidate-before-reject-${checked}`);
       return {
         status: "stopped_before_reject",
         checked,
@@ -1076,7 +1080,7 @@ async function runRejectTargetsFromSearch(page) {
     const { emailPage, ...rejectEmailResult } = rejectEmailResultWithPage;
 
     if (!rejectEmailResult.clicked || !rejectEmailResult.emailBodyFilled) {
-      const screenshot = await saveScreenshot(emailPage || page, `search-reject-step-failed-${checked}`);
+      const screenshot = await screenshots.error(emailPage || page, `search-reject-step-failed-${checked}`);
       return {
         status: "reject_step_failed",
         checked,
@@ -1094,7 +1098,7 @@ async function runRejectTargetsFromSearch(page) {
     }
 
     if (!config.saveAndSend) {
-      const screenshot = await saveScreenshot(emailPage || page, `search-email-filled-${checked}`);
+      const screenshot = await screenshots.step(emailPage || page, `search-email-filled-${checked}`);
       return {
         status: "stopped_before_send",
         checked,
@@ -1113,7 +1117,7 @@ async function runRejectTargetsFromSearch(page) {
 
     const sendResult = await clickSaveAndSend(emailPage, page);
     if (!sendResult.sent) {
-      const screenshot = await saveScreenshot(sendResult.emailPageClosed ? page : emailPage || page, `search-save-send-failed-${checked}`);
+      const screenshot = await screenshots.error(sendResult.emailPageClosed ? page : emailPage || page, `search-save-send-failed-${checked}`);
       return {
         status: "save_send_failed",
         checked,
@@ -1420,7 +1424,7 @@ async function ensureLoggedIn(page, { reason = "unknown" } = {}) {
       return true;
     }
 
-    const screenshot = await saveScreenshot(page, `auto-login-failed-${reason}`);
+    const screenshot = await screenshots.error(page, `auto-login-failed-${reason}`);
     await logEvent("auto_login_failed", {
       reason,
       url: page.url(),
@@ -3461,12 +3465,6 @@ async function waitUntilInterrupted() {
   });
 }
 
-async function saveScreenshot(page, name) {
-  const filename = `${name.replace(/[^a-z0-9-]+/gi, "-")}.png`;
-  const absolutePath = path.join(screenshotDir, filename);
-  await page.screenshot({ path: absolutePath, fullPage: true }).catch(() => undefined);
-  return absolutePath;
-}
 
 async function loadRejectTargets() {
   const ids = [...config.rejectIds];

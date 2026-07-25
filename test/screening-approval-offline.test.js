@@ -12,7 +12,9 @@ import {
   verifyFinalAssignments,
 } from "../src/screening-approval.js";
 
-const htmlDir = process.env.SCHOLARONE_HTML_DIR || "/Users/itaprac/Downloads";
+// Te snapshoty nie zachowały się do przeniesienia do repo. Wskaż katalog przez
+// SCHOLARONE_HTML_DIR, żeby uruchomić testy na własnych zrzutach ScholarOne.
+const htmlDir = process.env.SCHOLARONE_HTML_DIR || "";
 const FIXTURES = {
   checklist: path.join(htmlDir, "approve_page.html"),
   editorInChief: path.join(htmlDir, "after_aprove.html"),

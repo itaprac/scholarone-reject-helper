@@ -12,7 +12,9 @@ import {
   waitForManuscriptMetadataReady,
 } from "../src/screening-metadata.js";
 
-const htmlDir = process.env.SCHOLARONE_HTML_DIR || "/Users/itaprac/Downloads";
+// Te snapshoty nie zachowały się do przeniesienia do repo. Wskaż katalog przez
+// SCHOLARONE_HTML_DIR, żeby uruchomić testy na własnych zrzutach ScholarOne.
+const htmlDir = process.env.SCHOLARONE_HTML_DIR || "";
 const files = {
   details: path.join(htmlDir, "Article_details.html"),
   abstract: path.join(htmlDir, "Abstract_popup.html"),

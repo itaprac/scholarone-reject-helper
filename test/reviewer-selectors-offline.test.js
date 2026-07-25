@@ -1,8 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import fs from "node:fs";
 import fsp from "node:fs/promises";
-import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { chromium } from "playwright";
 import {
@@ -13,22 +11,13 @@ import {
   waitForReviewerListReady,
 } from "../src/select-reviewers.js";
 import { REVIEWER_SELECTORS } from "../src/reviewer-selectors.js";
+import { FIXTURES, fixturePath } from "./fixtures.js";
 
-const htmlDir = process.env.SCHOLARONE_HTML_DIR || "/Users/itaprac/Downloads";
-const files = {
-  home: path.join(htmlDir, "ScholarOne Manuscripts.html"),
-  admin: path.join(htmlDir, "admin_center.html"),
-  queue: path.join(htmlDir, "Select_reviewers_list.html"),
-  article: path.join(htmlDir, "selecxt_reviweers_article.html"),
-  createAccount: path.join(htmlDir, "nwe_acc_add.html"),
-  invitePopup: path.join(htmlDir, "ivniteall_popup.html"),
-  firstInviteAll: path.join(htmlDir, "invite_all_first.html"),
-};
-const missing = Object.values(files).filter((file) => !fs.existsSync(file));
+const files = Object.fromEntries(
+  Object.keys(FIXTURES).map((name) => [name, fixturePath(name)])
+);
 
-test("offline ScholarOne selectors match every supplied HTML snapshot", {
-  skip: missing.length ? `Brak snapshotów: ${missing.join(", ")}` : false,
-}, async () => {
+test("offline ScholarOne selectors match every supplied HTML snapshot", async () => {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ javaScriptEnabled: false });
 
@@ -74,8 +63,8 @@ test("offline ScholarOne selectors match every supplied HTML snapshot", {
 
     const createAccount = await loadPage(context, files.createAccount);
     assert.equal(await createAccount.locator(REVIEWER_SELECTORS.createAndAdd).count(), 1);
-    assert.equal(await createAccount.locator("input[name='PERSON_FIRSTNAME']").inputValue(), "Bijoy Krishna");
-    assert.equal(await createAccount.locator("input[name='EMAIL_ADDRESS']").inputValue(), "bijoy91@tezu.ernet.in");
+    assert.equal(await createAccount.locator("input[name='PERSON_FIRSTNAME']").inputValue(), "Michalski");
+    assert.equal(await createAccount.locator("input[name='EMAIL_ADDRESS']").inputValue(), "reviewer2@example.org");
 
     const firstInviteAllPage = await context.newPage();
     await firstInviteAllPage.goto(pathToFileURL(files.firstInviteAll).href, { waitUntil: "load" });
@@ -109,7 +98,7 @@ test("Reviewer List readiness tolerates ScholarOne's temporary blank shell", asy
         <tr><td><b>Reviewer List</b></td><td>1 - 1 of 1</td></tr>
         <tr>
           <td><input name="XIK_RP_ID_1" value="reviewer-1"></td>
-          <td><a>Malik, Muhammad Shahid Iqbal</a></td>
+          <td><a>Nowak, Piotr</a></td>
           <td></td>
           <td>Selected: 13-Jul-2026</td>
         </tr>
@@ -118,7 +107,7 @@ test("Reviewer List readiness tolerates ScholarOne's temporary blank shell", asy
 
     assert.match((await ready).headerText, /1\s*-\s*1\s+of\s+1/i);
     const result = await readReviewerPage(page);
-    assert.equal(result.reviewers[0].name, "Malik, Muhammad Shahid Iqbal");
+    assert.equal(result.reviewers[0].name, "Nowak, Piotr");
   } finally {
     await browser.close();
   }
@@ -133,16 +122,16 @@ test("existing-email Create Account state exposes an image-only Save and Add", a
       <p>A person with this e-mail address already exists in the system:</p>
       <p>Alam, Md. Golam Rabiul;</p>
       <p>To use this existing person, click the "Save and Add" button.</p>
-      <input name="EMAIL_ADDRESS" value="rabiul.alam@bracu.ac.bd">
+      <input name="EMAIL_ADDRESS" value="reviewer-a@example.org">
       <a href="javascript:window.close()"><img src="/images/en_US/buttons/close_window.gif" width="100" height="18"></a>
       <a href="javascript:void(0)"><img src="/images/en_US/buttons/save_add.gif" width="120" height="18"></a>
     `);
 
     assert.deepEqual(await readExistingEmailConflict(page, {
-      name: "Md Golam Rabiul Alam",
-      email: "rabiul.alam@bracu.ac.bd",
+      name: "Kowalska, Anna",
+      email: "reviewer-a@example.org",
     }), {
-      email: "rabiul.alam@bracu.ac.bd",
+      email: "reviewer-a@example.org",
       emailMatches: true,
       controlCount: 1,
       controlVisible: true,
@@ -165,14 +154,14 @@ test("existing-email Create Account state supports ScholarOne's generic save.gif
       <p>A person with this e-mail address already exists in the system:</p>
       <p>Alam, Md. Golam Rabiul;</p>
       <p>To use this existing person, click the "Save and Add" button.</p>
-      <input name="EMAIL_ADDRESS" value="rabiul.alam@bracu.ac.bd">
+      <input name="EMAIL_ADDRESS" value="reviewer-a@example.org">
       <a href="javascript:window.close()"><img src="/images/en_US/buttons/close_window.gif" width="100" height="18"></a>
       <a href="javascript:void(0)"><img src="/images/en_US/buttons/save.gif" width="52" height="18"></a>
     `);
 
     const conflict = await readExistingEmailConflict(page, {
-      name: "Md Golam Rabiul Alam",
-      email: "rabiul.alam@bracu.ac.bd",
+      name: "Kowalska, Anna",
+      email: "reviewer-a@example.org",
     });
     assert.equal(conflict.controlCount, 1);
     assert.equal(conflict.controlVisible, true);
@@ -188,7 +177,7 @@ test("existing-email Save and Add may become visible shortly after DOMContentLoa
   try {
     await page.setContent(`
       <p>A person with this e-mail address already exists in the system:</p>
-      <input name="EMAIL_ADDRESS" value="apatra@radford.edu">
+      <input name="EMAIL_ADDRESS" value="reviewer-b@example.org">
       <a id="save-and-add" href="javascript:void(0)" style="display: none">
         <img src="/images/en_US/buttons/save_add.gif" width="120" height="18">
       </a>
@@ -201,11 +190,11 @@ test("existing-email Save and Add may become visible shortly after DOMContentLoa
 
     assert.deepEqual(await readExistingEmailConflict(page, {
       name: "Amar Nath Patra",
-      email: "apatra@radford.edu",
+      email: "reviewer-b@example.org",
     }, {
       controlVisibilityTimeout: 2_000,
     }), {
-      email: "apatra@radford.edu",
+      email: "reviewer-b@example.org",
       emailMatches: true,
       controlCount: 1,
       controlVisible: true,

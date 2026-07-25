@@ -1,0 +1,54 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_ASSESSMENT_MODEL,
+  DEFAULT_ASSESSMENT_REASONING_EFFORT,
+} from "../assessment-config.js";
+
+export const projectRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  ".."
+);
+
+// Jedyne miejsce z wartościami domyślnymi. Wcześniej ten sam adres czasopisma
+// był wpisany w czterech plikach, a liczby powtarzały się dodatkowo w
+// atrybutach value= w ui/index.html.
+export const DEFAULTS = Object.freeze({
+  startUrl: "https://mc.manuscriptcentral.com/kes",
+
+  // Odrzucanie z kolejki Complete Checklist.
+  maxChecked: 10,
+  submittedOlderThanDays: 30,
+  slowMo: 0,
+  queueStartPage: 0,
+
+  // Wybór recenzentów.
+  reviewersPerPaper: 10,
+  reviewerMaxManuscripts: 3,
+  reviewerRefreshWaitSeconds: 60,
+  reviewerQueue: "combined",
+
+  // Wstępna ocena LLM.
+  screeningMaxChecked: 10,
+  assessmentModel: DEFAULT_ASSESSMENT_MODEL,
+  assessmentReasoningEffort: DEFAULT_ASSESSMENT_REASONING_EFFORT,
+  assessmentTimeoutSeconds: 120,
+
+  // Katalogi.
+  profileDir: path.join(projectRoot, "playwright-profile"),
+  logsDir: path.join(projectRoot, "logs"),
+
+  headless: false,
+  debugScreenshots: false,
+});
+
+// Panel startuje z ostrożniejszymi liczbami niż goły CLI: spowolnienie klikania
+// i większy zakres kolejki są tam wygodniejsze, a użytkownik i tak je widzi.
+export const UI_DEFAULTS = Object.freeze({
+  ...DEFAULTS,
+  maxChecked: 50,
+  slowMo: 500,
+});
+
+export const REVIEWER_QUEUES = Object.freeze(["combined", "select", "invite"]);
