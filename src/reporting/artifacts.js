@@ -15,7 +15,7 @@ export async function writeRunArtifacts(result, { config, runId, reportDir }) {
   const payload = {
     runId,
     createdAt: new Date().toISOString(),
-    config: publicConfigSnapshot(),
+    config: publicConfigSnapshot(config),
     artifacts,
     result,
   };
