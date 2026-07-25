@@ -18,12 +18,27 @@ import {
 import { isRevisionManuscriptId, normalizeManuscriptId } from "../manuscript-rules.js";
 import { clickCompleteChecklist } from "../steps/checklist.js";
 import { ensureManuscriptListReady, inspectCurrentManuscript } from "../steps/queue.js";
+import { createActionLog } from "../core/action-log.js";
+import { createLiveGuard } from "../core/live-guard.js";
+import {
+  loadScreeningProgress,
+  markScreeningProgress,
+  screeningProgressPath,
+  screeningResumeDecision,
+} from "../screening-progress.js";
 import { context } from "./context.js";
 
 export async function runMetadataCollection(page) {
   const provider = createAssessmentProvider(context.config, {
     runId: context.runId,
     log: context.log,
+  });
+
+  const actionLog = createActionLog(context.config.logsDir);
+  const progressPath = screeningProgressPath(context.config.logsDir);
+  const progress = await loadScreeningProgress(progressPath);
+  const liveGuard = createLiveGuard({
+    limit: context.config.applyAssessmentDecisions ? context.config.maxLiveActions : null,
   });
 
   // W trybie live ocena musi poprzedzać kliknięcie na otwartej stronie, więc
@@ -107,6 +122,42 @@ export async function runMetadataCollection(page) {
     const summary = await readManuscriptSummary(page);
     if (!summary.manuscriptId || !summary.title) {
       throw new Error(summary.reason || "Nie udało się odczytać tytułu manuskryptu.");
+    }
+
+    // Wznowienie po przerwanym przebiegu live: artykuł z potwierdzoną akcją
+    // pomijamy, a taki z akcją rozpoczętą i niepotwierdzoną zatrzymuje przebieg,
+    // bo tylko człowiek może sprawdzić, czy wiadomość wyszła.
+    if (context.config.applyAssessmentDecisions) {
+      const resume = screeningResumeDecision(progress, summary.manuscriptId);
+
+      if (resume.action === "skip") {
+        await context.log("screening_resume_skipped", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          reason: resume.reason,
+          at: resume.at,
+        });
+        console.log(`[RESUME] ${summary.manuscriptId} -> pomijam, poprzednio: ${resume.reason}`);
+
+        const movedNextResume = await goToNextDocument(page);
+        if (!movedNextResume) {
+          await returnToList(page);
+          hasOpenDetailsPage = false;
+        }
+        continue;
+      }
+
+      if (resume.action === "needs_manual_check") {
+        await context.log("screening_resume_needs_manual_check", {
+          checked,
+          manuscriptId: summary.manuscriptId,
+          reason: resume.reason,
+          at: resume.at,
+        });
+        throw new Error(
+          `${summary.manuscriptId}: ${resume.reason} Sprawdź ręcznie w ScholarOne, popraw wpis w ${progressPath} i uruchom ponownie.`
+        );
+      }
     }
 
     console.log(`[${checked}] ${summary.manuscriptId} -> tytuł: ${summary.title}`);
@@ -239,6 +290,19 @@ export async function runMetadataCollection(page) {
     }
 
     if (context.config.applyAssessmentDecisions && assessment && !assessmentError) {
+      // Limit sprawdzany przed akcją, a nie po niej — inaczej operacja o jedną
+      // za dużo zdążyłaby się już wykonać.
+      liveGuard.assertCanProceed(assessment.decision);
+
+      // Ślad zapisany przed kliknięciem: gdyby przebieg tu padł, wznowienie
+      // zobaczy "attempted" i zgłosi artykuł do ręcznego sprawdzenia zamiast
+      // powtarzać akcję.
+      await markScreeningProgress(progress, progressPath, summary.manuscriptId, {
+        status: "attempted",
+        decision: assessment.decision,
+        runId: context.runId,
+      });
+
       console.log(`[LIVE ACTION] ${summary.manuscriptId}: wykonuję ${assessment.decision} w ScholarOne...`);
       try {
         decisionAction = await applyLiveAssessmentDecision(page, assessment);
@@ -246,13 +310,31 @@ export async function runMetadataCollection(page) {
           page,
           `live-action-complete-${assessment.decision.toLowerCase()}-${summary.manuscriptId}`
         );
+
+        liveGuard.recordPerformed();
+        await markScreeningProgress(progress, progressPath, summary.manuscriptId, {
+          status: assessment.decision === "REJECT" ? "rejected" : "approved",
+          decision: assessment.decision,
+          runId: context.runId,
+        });
+        await actionLog.record({
+          runId: context.runId,
+          mode: "screening-live",
+          manuscriptId: summary.manuscriptId,
+          action: assessment.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+          outcome: "sent",
+          confirmed: true,
+          detail: assessment.reason,
+        });
+
         await context.log("assessment_live_action_completed", {
           checked,
           manuscriptId: summary.manuscriptId,
           decision: assessment.decision,
+          liveActions: liveGuard.describe(),
           decisionAction,
         });
-        console.log(`[LIVE ACTION COMPLETE] ${summary.manuscriptId}: ${assessment.decision}.`);
+        console.log(`[LIVE ACTION COMPLETE] ${summary.manuscriptId}: ${assessment.decision} (${liveGuard.describe()}).`);
       } catch (error) {
         const actionScreenshot = await context.screenshots.error(page, `live-action-error-${summary.manuscriptId}`);
         actionError = {
@@ -262,6 +344,18 @@ export async function runMetadataCollection(page) {
           screenshot: actionScreenshot,
         };
         stoppedAfterActionError = true;
+
+        // Stan zostaje "attempted": automat nie wie, czy wiadomość wyszła, więc
+        // wznowienie ma to zgłosić do ręcznego sprawdzenia, a nie powtórzyć.
+        await actionLog.record({
+          runId: context.runId,
+          mode: "screening-live",
+          manuscriptId: summary.manuscriptId,
+          action: assessment.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+          outcome: "failed",
+          confirmed: false,
+          detail: error.message,
+        });
         await context.log("assessment_live_action_failed", {
           checked,
           manuscriptId: summary.manuscriptId,

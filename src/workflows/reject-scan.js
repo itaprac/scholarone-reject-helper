@@ -19,6 +19,7 @@ import {
 } from "../steps/queue.js";
 import { dismissCookieBanner, goToNextDocument, waitForDetailsPageOrRelogin } from "../steps/queue.js";
 import { isLoginPage } from "../core/login.js";
+import { createActionLog } from "../core/action-log.js";
 import { context, formatRejectedProgress, hasMaxRejectedLimit } from "./context.js";
 
 export async function runScan(page) {
@@ -298,6 +299,15 @@ export async function runScan(page) {
 
     rejected += 1;
     const screenshot = await context.screenshots.proof(page, `candidate-sent-${checked}`);
+    await createActionLog(context.config.logsDir).record({
+      runId: context.runId,
+      mode: "reject-scan",
+      manuscriptId: details.manuscriptId,
+      action: "reject-email",
+      outcome: "sent",
+      confirmed: true,
+      detail: details.reason || null,
+    });
 
     await context.log("candidate_rejected_and_sent", {
       rowIndex: checked - 1,

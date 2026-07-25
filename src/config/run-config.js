@@ -46,6 +46,10 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
     clickReject: parseBool(args["click-reject"] ?? env.CLICK_REJECT, false),
     saveAndSend: parseBool(args["save-and-send"] ?? env.SAVE_AND_SEND, false),
     maxRejected: toOptionalPositiveInteger(args["max-rejected"] || env.MAX_REJECTED),
+    // Wspólny bezpiecznik operacji nieodwracalnych dla trybów, które dotąd nie
+    // miały odpowiednika --max-rejected: screeningu live i zaproszeń.
+    maxLiveActions: toOptionalPositiveInteger(args["max-live-actions"] || env.MAX_LIVE_ACTIONS)
+      ?? DEFAULTS.maxLiveActions,
     keepOpen: parseBool(args["keep-open"] ?? env.KEEP_OPEN, false),
     debugScreenshots: parseBool(args["debug-screenshots"] ?? env.DEBUG_SCREENSHOTS, DEFAULTS.debugScreenshots),
     autoLogin: parseBool(

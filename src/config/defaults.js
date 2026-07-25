@@ -38,6 +38,11 @@ export const DEFAULTS = Object.freeze({
   // obciążenie w ryzach, a i tak usuwa większość czasu bezczynności.
   assessmentConcurrency: 3,
 
+  // Domyślny bezpiecznik trybów live. Świadomie ustawiony, a nie nieskończony:
+  // --scan-all-metadata puszcza całą kolejkę, więc jedno przeoczenie w prompcie
+  // mogłoby skończyć się dziesiątkami wysłanych wiadomości.
+  maxLiveActions: 25,
+
   // Katalogi.
   profileDir: path.join(projectRoot, "playwright-profile"),
   logsDir: path.join(projectRoot, "logs"),

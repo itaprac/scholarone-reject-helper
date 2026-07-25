@@ -15,6 +15,7 @@ import {
 } from "../reject-progress.js";
 import { normalizeManuscriptId } from "../manuscript-rules.js";
 import { openViewDetailsByIndex, waitForDetailsPageOrRelogin } from "../steps/queue.js";
+import { createActionLog } from "../core/action-log.js";
 import { context, formatRejectedProgress, hasMaxRejectedLimit } from "./context.js";
 
 export async function runRejectTargetsFromSearch(page) {
@@ -252,6 +253,15 @@ export async function runRejectTargetsFromSearch(page) {
     }
 
     rejected += 1;
+    await createActionLog(context.config.logsDir).record({
+      runId: context.runId,
+      mode: "reject-from-report",
+      manuscriptId,
+      action: "reject-email",
+      outcome: "sent",
+      confirmed: true,
+      detail: details.reason || null,
+    });
     results.push({
       manuscriptId,
       status: "sent",
