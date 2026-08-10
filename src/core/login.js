@@ -9,6 +9,18 @@ const LOGGED_IN_TEXT =
 export async function isLoginPage(page) {
   return page.evaluate((loggedInSource) => {
     const text = (document.body?.innerText || "").replace(/\s+/g, " ");
+
+    // ScholarOne potrafi wyrenderować tekst typu "Admin Center" także na stronie
+    // logowania (np. w instrukcjach albo ukrytej powłoce). Stabilne kontrolki
+    // logowania mają pierwszeństwo przed ogólnymi markerami aplikacji.
+    const knownUsername = document.querySelector("#USERID");
+    const knownPassword = document.querySelector("#PASSWORD");
+    const knownLogin = document.querySelector("#logInButton");
+    if (knownUsername && knownPassword && knownLogin &&
+        isVisible(knownUsername) && isVisible(knownPassword) && isVisible(knownLogin)) {
+      return true;
+    }
+
     // Widoczne pole hasła obok markera zalogowania zdarza się na ekranie zmiany
     // hasła — tam nie chcemy uruchamiać auto-loginu.
     if (new RegExp(loggedInSource, "i").test(text)) return false;

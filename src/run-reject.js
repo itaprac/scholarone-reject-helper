@@ -14,6 +14,7 @@ import { formatTokenUsage } from "./screening-report.js";
 import { quickSearchManuscript as quickSearchStep } from "./steps/search.js";
 import {
   countViewDetailsControls,
+  dismissCookieBanner,
   ensureManuscriptListReady,
   setQueueContext,
 } from "./steps/queue.js";
@@ -103,6 +104,9 @@ export async function runReject(rawArgs = process.argv.slice(2)) {
     if (!config.cdp || page.url() === "about:blank") {
       await page.goto(config.startUrl, { waitUntil: "domcontentloaded" });
     }
+    // OneTrust potrafi przykryć formularz logowania i przechwycić kliknięcie.
+    // Zamykamy go przed próbą auto-loginu, nie dopiero po wejściu do kolejki.
+    await dismissCookieBanner(page);
     await ensureLoggedIn(page, { reason: "startup" });
 
     const result = await selectWorkflow(config)(page);

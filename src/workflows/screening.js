@@ -11,6 +11,7 @@ import { formatSingleAssessmentUsage } from "../reporting/artifacts.js";
 import { clickRejectAndFillEmail, clickSaveAndSend } from "../steps/reject-email.js";
 import {
   goToNextDocument,
+  isCompleteChecklistQueueEmpty,
   openNextUnseenViewDetailsAcrossQueuePages,
   returnToList,
   waitForDetailsPageOrRelogin,
@@ -59,7 +60,15 @@ export async function runMetadataCollection(page) {
 
   while (context.config.scanAllMetadata || checked < context.config.maxChecked) {
     if (!hasOpenDetailsPage) {
-      await ensureManuscriptListReady(page);
+      try {
+        await ensureManuscriptListReady(page);
+      } catch (error) {
+        if (await detectExhaustedCompleteChecklist(page, error, checked)) {
+          queueExhausted = true;
+          break;
+        }
+        throw error;
+      }
       const opened = await openNextUnseenViewDetailsAcrossQueuePages(page, seenManuscriptIds);
       if (!opened) {
         queueExhausted = true;
@@ -81,7 +90,10 @@ export async function runMetadataCollection(page) {
     if (manuscriptId && seenManuscriptIds.has(manuscriptId)) {
       const movedNext = await goToNextDocument(page);
       if (!movedNext) {
-        await returnToList(page);
+        if (await returnToListOrDetectExhausted(page, checked)) {
+          queueExhausted = true;
+          break;
+        }
         hasOpenDetailsPage = false;
       }
       continue;
@@ -113,7 +125,10 @@ export async function runMetadataCollection(page) {
 
       const movedNext = await goToNextDocument(page);
       if (!movedNext) {
-        await returnToList(page);
+        if (await returnToListOrDetectExhausted(page, checked)) {
+          queueExhausted = true;
+          break;
+        }
         hasOpenDetailsPage = false;
       }
       continue;
@@ -141,7 +156,10 @@ export async function runMetadataCollection(page) {
 
         const movedNextResume = await goToNextDocument(page);
         if (!movedNextResume) {
-          await returnToList(page);
+          if (await returnToListOrDetectExhausted(page, checked)) {
+            queueExhausted = true;
+            break;
+          }
           hasOpenDetailsPage = false;
         }
         continue;
@@ -221,7 +239,10 @@ export async function runMetadataCollection(page) {
 
       const movedNextDeferred = await goToNextDocument(page);
       if (!movedNextDeferred) {
-        await returnToList(page);
+        if (await returnToListOrDetectExhausted(page, checked)) {
+          queueExhausted = true;
+          break;
+        }
         hasOpenDetailsPage = false;
       }
       continue;
@@ -393,14 +414,20 @@ export async function runMetadataCollection(page) {
     }
 
     if (context.config.applyAssessmentDecisions && decisionAction?.completed) {
-      await returnToList(page);
+      if (await returnToListOrDetectExhausted(page, checked)) {
+        queueExhausted = true;
+        break;
+      }
       hasOpenDetailsPage = false;
       continue;
     }
 
     const movedNext = await goToNextDocument(page);
     if (!movedNext) {
-      await returnToList(page);
+      if (await returnToListOrDetectExhausted(page, checked)) {
+        queueExhausted = true;
+        break;
+      }
       hasOpenDetailsPage = false;
     }
   }
@@ -425,6 +452,31 @@ export async function runMetadataCollection(page) {
     maxChecked: context.config.maxChecked,
     queueExhausted,
   });
+}
+
+async function returnToListOrDetectExhausted(page, checked) {
+  try {
+    await returnToList(page);
+    return false;
+  } catch (error) {
+    if (await detectExhaustedCompleteChecklist(page, error, checked)) {
+      return true;
+    }
+    throw error;
+  }
+}
+
+async function detectExhaustedCompleteChecklist(page, error, checked) {
+  if (!(await isCompleteChecklistQueueEmpty(page))) {
+    return false;
+  }
+  await context.log("metadata_queue_exhausted", {
+    checked,
+    reason: "Complete Checklist count is 0",
+    previousError: error?.message || null,
+  });
+  console.log("[QUEUE] Complete Checklist jest puste — kończę Initial Assessment poprawnie.");
+  return true;
 }
 
 // Ocena wykonywana poza pętlą przeglądarki. Wynik dopisuje się do rekordu, który

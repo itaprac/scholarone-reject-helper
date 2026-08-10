@@ -151,6 +151,13 @@ export async function dismissCookieBanner(page) {
   }
 }
 
+export async function isCompleteChecklistQueueEmpty(page) {
+  return page.evaluate(() => {
+    const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
+    return /(?:^|\s)0\s+Complete\s+Checklist(?:\s|$)/i.test(text);
+  }).catch(() => false);
+}
+
 export async function countViewDetailsControls(page) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
