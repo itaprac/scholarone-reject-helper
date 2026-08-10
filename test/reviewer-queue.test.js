@@ -15,10 +15,10 @@ import {
   reviewersPendingInvitation,
 } from "../src/select-reviewers.js";
 
-test("combined reviewer mode drains Invite Reviewers before Select Reviewers", () => {
-  assert.deepEqual(reviewerQueueLabels("combined"), ["Invite Reviewers", "Select Reviewers"]);
+test("combined reviewer mode drains Invite Reviewers before Assign/Select Reviewers", () => {
+  assert.deepEqual(reviewerQueueLabels("combined"), ["Invite Reviewers", "Assign Reviewers", "Select Reviewers"]);
   assert.deepEqual(reviewerQueueLabels("invite"), ["Invite Reviewers"]);
-  assert.deepEqual(reviewerQueueLabels("select"), ["Select Reviewers"]);
+  assert.deepEqual(reviewerQueueLabels("select"), ["Assign Reviewers", "Select Reviewers"]);
 });
 
 test("an unusual-activity alert skips reviewer handling before any invitation work", () => {

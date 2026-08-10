@@ -34,7 +34,7 @@ export async function detectReviewerPageState(page, queueLabel = null) {
       element.getAttribute("title"),
       element.getAttribute("aria-label"),
     ].filter(Boolean).join(" "))));
-    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|select\s+reviewers|invite\s+reviewers/i.test(bodyText) ||
+    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|(?:assign|select|invite)\s+reviewers/i.test(bodyText) ||
       Boolean(document.querySelector("#QUICK_SEARCH_HEADER_SEARCH_TEXT"));
     if ((passwordVisible || (usernameVisible && loginVisible)) && !loggedInMarker) return "login";
 

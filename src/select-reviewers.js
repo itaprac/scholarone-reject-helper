@@ -239,6 +239,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           status: "reviewer_batch_finished",
           requested: config.maxManuscripts,
           completed: results.length,
+          skipped: skippedManuscriptIds.size,
           queueExhausted,
           deferred: deferredReviewers.length,
           results,
@@ -321,7 +322,7 @@ async function waitForReviewerRefresh(page, config, log, pending) {
 
 async function runDeferredReviewerManuscript(page, options) {
   const { config, log, pending } = options;
-  for (const queueLabel of ["Invite Reviewers", "Select Reviewers"]) {
+  for (const queueLabel of reviewerQueueLabels("combined")) {
     try {
       return await runOneReviewerManuscript(page, {
         ...options,
@@ -381,7 +382,7 @@ async function runBatchReviewerManuscript(page, options) {
     }
   }
 
-  const error = new Error("Brak artykułów zarówno w Invite Reviewers, jak i Select Reviewers.");
+  const error = new Error("Brak artykułów w Invite Reviewers ani Assign/Select Reviewers.");
   error.cause = lastQueueError;
   throw error;
 }
@@ -402,7 +403,7 @@ async function recoverReviewerManuscript(page, options, originalError) {
   for (let recoveryAttempt = 1; recoveryAttempt <= 2; recoveryAttempt += 1) {
     await returnToReviewerStart(page, config, log, "reviewer_recovery_login");
 
-    for (const queueLabel of ["Invite Reviewers", "Select Reviewers"]) {
+    for (const queueLabel of reviewerQueueLabels("combined")) {
       try {
         const result = await runOneReviewerManuscript(page, {
           ...options,
@@ -446,7 +447,7 @@ async function recoverReviewerManuscript(page, options, originalError) {
   }
 
   const error = new Error(
-    `Nie udało się wznowić ${manuscriptId} po ponownym logowaniu w Invite Reviewers ani Select Reviewers.`
+    `Nie udało się wznowić ${manuscriptId} po ponownym logowaniu w Invite Reviewers ani Assign/Select Reviewers.`
   );
   error.cause = lastError;
   throw error;
@@ -745,7 +746,7 @@ async function refreshCurrentReviewerTask(page, log, reason) {
 }
 
 function isQueueExhaustedError(error) {
-  return /Nie znaleziono linku (Select|Invite) Reviewers|Kolejka nie zawiera pozycji Select|Brak artykułów zarówno/i
+  return /Nie znaleziono linku (Assign|Select|Invite) Reviewers|Kolejka nie zawiera pozycji Select|Brak artykułów (?:w|zarówno)/i
     .test(error?.message || "");
 }
 
@@ -755,9 +756,12 @@ function isTargetManuscriptMissingError(error) {
 }
 
 export function reviewerQueueLabels(mode) {
-  if (mode === "combined") return ["Invite Reviewers", "Select Reviewers"];
+  // Nazwa drugiej kolejki zależy od konfiguracji ScholarOne: starszy layout
+  // używa "Select Reviewers", a bieżący KES pokazuje "Assign Reviewers".
+  // Traktujemy je jako aliasy tej samej fazy i próbujemy aktualną nazwę pierwszą.
+  if (mode === "combined") return ["Invite Reviewers", "Assign Reviewers", "Select Reviewers"];
   if (mode === "invite") return ["Invite Reviewers"];
-  if (mode === "select") return ["Select Reviewers"];
+  if (mode === "select") return ["Assign Reviewers", "Select Reviewers"];
   throw new Error(`Nieznany tryb kolejki reviewerów: ${mode}`);
 }
 
@@ -927,7 +931,7 @@ async function waitForReviewerLoggedIn(page, timeout) {
     };
     const text = (document.body?.innerText || "").replace(/\s+/g, " ");
     const passwordVisible = Array.from(document.querySelectorAll("input[type='password']")).some(visible);
-    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|select\s+reviewers|invite\s+reviewers|view\s+details/i.test(text) ||
+    const loggedInMarker = /log\s*out|admin\s+(?:center|dashboard)|(?:assign|select|invite)\s+reviewers|view\s+details/i.test(text) ||
       Boolean(document.querySelector("#QUICK_SEARCH_HEADER_SEARCH_TEXT"));
     return loggedInMarker && !passwordVisible;
   }, null, { timeout }).then(() => true).catch(() => false);
@@ -1092,7 +1096,7 @@ async function findQuickSearchReviewerAction(page, manuscriptId) {
       const select = actions[index];
       const rowText = normalize(select.closest("tr")?.innerText || select.closest("tr")?.textContent);
       if (!rowText.includes(target)) continue;
-      const preferredLabels = ["Invite Reviewers", "Select Reviewers", "View Details"];
+      const preferredLabels = ["Invite Reviewers", "Assign Reviewers", "Select Reviewers", "View Details"];
       for (const label of preferredLabels) {
         const option = Array.from(select.options).find((candidate) =>
           (candidate.textContent || "").replace(/\s+/g, " ").trim() === label
