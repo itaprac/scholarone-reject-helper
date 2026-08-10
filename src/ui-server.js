@@ -66,6 +66,14 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { run });
     }
 
+    // Puls przebiegu z CLI: joby z panelu widać przez /api/jobs, ale przebieg
+    // odpalony z terminala byłby niewidoczny. Ten endpoint czyta
+    // logs/current-run.json pisany przez każdy przebieg i dokłada ogon zdarzeń.
+    if (url.pathname === "/api/cli-run" && req.method === "GET") {
+      const tail = clampInt(url.searchParams.get("tail"), 40, 1, 200);
+      return sendJson(res, await readCliRun(tail));
+    }
+
     if (url.pathname === "/api/doctor" && req.method === "GET") {
       return sendJson(res, { checks: await runDoctorChecks() });
     }
@@ -226,6 +234,93 @@ async function listReports() {
   }
 
   return reports.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+}
+
+async function readCliRun(tail) {
+  const run = await readJsonFile(path.join(projectRoot, "logs", "current-run.json"));
+  if (!run || typeof run !== "object") {
+    return { run: null, events: [] };
+  }
+
+  const alive = isProcessAlive(run.pid);
+  const effectiveStatus = run.status === "running" && !alive ? "dead" : run.status;
+  return {
+    run: { ...run, alive, effectiveStatus },
+    events: await readRunEvents(run.logFile, tail),
+  };
+}
+
+function isProcessAlive(pid) {
+  if (!Number.isFinite(pid)) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    // EPERM oznacza "istnieje, ale nie mój" — wciąż żywy.
+    return error.code === "EPERM";
+  }
+}
+
+async function readRunEvents(logFile, tail) {
+  if (typeof logFile !== "string" || !logFile) {
+    return [];
+  }
+
+  // Ścieżka pochodzi z pliku pulsu, ale i tak musi wskazywać JSONL w logs —
+  // panel nie może czytać dowolnych plików z dysku.
+  const logsDir = path.join(projectRoot, "logs");
+  const absolutePath = path.resolve(projectRoot, logFile);
+  const relative = path.relative(logsDir, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || !/\.jsonl$/i.test(absolutePath)) {
+    return [];
+  }
+
+  let content = "";
+  try {
+    content = await fsp.readFile(absolutePath, "utf8");
+  } catch {
+    return [];
+  }
+
+  const lines = content.split(/\r?\n/).filter(Boolean).slice(-tail);
+  const events = [];
+  for (const line of lines) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    events.push(compactEvent(entry));
+  }
+  return events;
+}
+
+function compactEvent(entry) {
+  const slim = {
+    at: entry.at,
+    type: entry.type,
+    manuscriptId: entry.manuscriptId ?? entry.details?.manuscriptId,
+    reason: entry.reason ?? entry.details?.reason,
+    status: typeof entry.status === "string" ? entry.status : undefined,
+    checked: entry.checked,
+    rejected: entry.rejected,
+    message: entry.message,
+    note: entry.note,
+  };
+  return Object.fromEntries(
+    Object.entries(slim).filter(([, value]) => value !== undefined && value !== null)
+  );
+}
+
+function clampInt(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.min(maximum, Math.max(minimum, parsed));
 }
 
 async function publicConfig() {

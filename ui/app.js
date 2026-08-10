@@ -10,6 +10,20 @@ const state = {
   activeView: "reject",
 };
 
+const MONITOR_POLL_MS = 2500;
+const MONITOR_TICK_MS = 1000;
+const MONITOR_TAIL = 100;
+const MONITOR_QUIET_AFTER_SECONDS = 45;
+
+const monitorState = {
+  run: null,
+  events: [],
+  offline: false,
+  offlineMessage: "",
+  renderedRunId: null,
+  renderedEventCount: -1,
+};
+
 const REPORT_COLUMN_COUNT = 5;
 const REPORT_STATUS_LABELS = {
   dry_run_finished: "Dry run finished",
@@ -29,9 +43,24 @@ const els = {
   rejectTab: document.getElementById("rejectTab"),
   screeningTab: document.getElementById("screeningTab"),
   reviewersTab: document.getElementById("reviewersTab"),
+  monitorTab: document.getElementById("monitorTab"),
   rejectPanel: document.getElementById("rejectPanel"),
   screeningPanel: document.getElementById("screeningPanel"),
   reviewersPanel: document.getElementById("reviewersPanel"),
+  monitorPanel: document.getElementById("monitorPanel"),
+  beaconDot: document.getElementById("beaconDot"),
+  beaconStatus: document.getElementById("beaconStatus"),
+  beaconNote: document.getElementById("beaconNote"),
+  factMode: document.getElementById("factMode"),
+  factPid: document.getElementById("factPid"),
+  factStarted: document.getElementById("factStarted"),
+  factHeartbeat: document.getElementById("factHeartbeat"),
+  tileChecked: document.getElementById("tileChecked"),
+  tileRejected: document.getElementById("tileRejected"),
+  tileResult: document.getElementById("tileResult"),
+  tileRunId: document.getElementById("tileRunId"),
+  monitorLogInfo: document.getElementById("monitorLogInfo"),
+  monitorLog: document.getElementById("monitorLog"),
   statusLine: document.getElementById("statusLine"),
   refreshBtn: document.getElementById("refreshBtn"),
   startUrl: document.getElementById("startUrl"),
@@ -92,10 +121,12 @@ const els = {
 els.rejectTab.addEventListener("click", () => activateView("reject"));
 els.screeningTab.addEventListener("click", () => activateView("screening"));
 els.reviewersTab.addEventListener("click", () => activateView("reviewers"));
+els.monitorTab.addEventListener("click", () => activateView("monitor"));
 const workflowTabs = [
   { view: "reject", tab: els.rejectTab },
   { view: "screening", tab: els.screeningTab },
   { view: "reviewers", tab: els.reviewersTab },
+  { view: "monitor", tab: els.monitorTab },
 ];
 for (const { view, tab } of workflowTabs) {
   tab.addEventListener("keydown", (event) => {
@@ -133,6 +164,7 @@ if (els.executeRunBtn) bindAsyncClick(els.executeRunBtn, executeSelectedRun);
 refresh().catch(showError);
 refreshDoctor().catch(() => undefined);
 refreshScreeningRuns().catch(() => undefined);
+startRunMonitor();
 refreshJobHistory().catch(() => undefined);
 
 async function api(path, options = {}) {
@@ -840,6 +872,7 @@ function activateView(view) {
     { name: "reject", tab: els.rejectTab, panel: els.rejectPanel },
     { name: "screening", tab: els.screeningTab, panel: els.screeningPanel },
     { name: "reviewers", tab: els.reviewersTab, panel: els.reviewersPanel },
+    { name: "monitor", tab: els.monitorTab, panel: els.monitorPanel },
   ];
   for (const item of views) {
     const active = item.name === view;
@@ -1038,4 +1071,243 @@ function formOptions() {
 
 function confirmDangerousAction(message) {
   return window.confirm(`${message}\n\nThis cannot be undone in ScholarOne.`);
+}
+
+// --- Run monitor (zakładka Monitor) ---
+// Pokazuje puls z logs/current-run.json niezależnie od tego, czy przebieg
+// wystartował z panelu, z CLI, czy przez agenta.
+
+function startRunMonitor() {
+  pollRunMonitor();
+  setInterval(pollRunMonitor, MONITOR_POLL_MS);
+  setInterval(renderMonitorClocks, MONITOR_TICK_MS);
+}
+
+async function pollRunMonitor() {
+  try {
+    const payload = await api(`/api/cli-run?tail=${MONITOR_TAIL}`);
+    monitorState.run = payload.run || null;
+    monitorState.events = payload.events || [];
+    monitorState.offline = false;
+    monitorState.offlineMessage = "";
+  } catch (error) {
+    monitorState.offline = true;
+    monitorState.offlineMessage = error.message;
+  }
+  renderMonitor();
+}
+
+function renderMonitor() {
+  renderBeacon();
+  renderMonitorTiles();
+  renderMonitorLog();
+}
+
+function renderBeacon() {
+  if (monitorState.offline) {
+    setBeacon("offline", "Offline", `UI server unreachable: ${monitorState.offlineMessage}`);
+    return;
+  }
+
+  const run = monitorState.run;
+  if (!run) {
+    setBeacon("idle", "Idle", "No run yet. Start one from a workflow tab or the CLI.");
+    setMonitorFacts({});
+    return;
+  }
+
+  const quietSeconds = secondsSince(run.updatedAt);
+  if (run.effectiveStatus === "running") {
+    if (quietSeconds !== null && quietSeconds > MONITOR_QUIET_AFTER_SECONDS) {
+      setBeacon("quiet", "Running", `Process is alive, but the log is quiet for ${formatQuietSeconds(quietSeconds)}. It may wait for login or a slow page.`);
+    } else {
+      setBeacon("running", "Running", "Process is alive and reporting.");
+    }
+  } else if (run.effectiveStatus === "finished") {
+    setBeacon("finished", "Finished", `Run completed ${relativeTime(run.finishedAt || run.updatedAt)}.`);
+  } else if (run.effectiveStatus === "failed") {
+    setBeacon("bad", "Failed", `Run failed ${relativeTime(run.finishedAt || run.updatedAt)}. Check the event log below.`);
+  } else if (run.effectiveStatus === "dead") {
+    setBeacon("bad", "Interrupted", "The run says it is active, but the process is gone (killed or crashed).");
+  } else {
+    setBeacon("idle", String(run.effectiveStatus || run.status || "Unknown"), "");
+  }
+
+  setMonitorFacts({
+    mode: run.mode,
+    pid: run.pid,
+    started: relativeTime(run.startedAt),
+    heartbeat: relativeTime(run.updatedAt),
+  });
+}
+
+function setBeacon(stateName, statusText, noteText) {
+  els.beaconDot.dataset.state = stateName;
+  els.beaconStatus.textContent = statusText;
+  els.beaconNote.textContent = noteText;
+}
+
+function setMonitorFacts(facts) {
+  setMonitorText(els.factMode, facts.mode);
+  setMonitorText(els.factPid, facts.pid);
+  setMonitorText(els.factStarted, facts.started);
+  setMonitorText(els.factHeartbeat, facts.heartbeat);
+}
+
+function renderMonitorTiles() {
+  const run = monitorState.offline ? null : monitorState.run;
+  setMonitorText(els.tileChecked, run ? run.checked : null);
+  setMonitorText(els.tileRejected, run ? run.rejected : null);
+  setMonitorText(els.tileResult, run?.resultStatus ? run.resultStatus.replaceAll("_", " ") : null);
+  setMonitorText(els.tileRunId, run ? run.runId : null);
+}
+
+function renderMonitorLog() {
+  if (monitorState.offline) {
+    els.monitorLogInfo.textContent = "connection lost, retrying…";
+    return;
+  }
+
+  const runId = monitorState.run?.runId || null;
+  els.monitorLogInfo.textContent = monitorState.run?.logFile
+    ? `tail of ${monitorState.run.logFile}`
+    : "tail of the run log";
+
+  const unchanged =
+    runId === monitorState.renderedRunId &&
+    monitorState.events.length === monitorState.renderedEventCount;
+  if (unchanged) {
+    return;
+  }
+
+  const firstRender = monitorState.renderedEventCount === -1;
+  const wasAtBottom =
+    els.monitorLog.scrollTop + els.monitorLog.clientHeight >= els.monitorLog.scrollHeight - 8;
+  monitorState.renderedRunId = runId;
+  monitorState.renderedEventCount = monitorState.events.length;
+
+  els.monitorLog.replaceChildren();
+
+  if (monitorState.events.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "log-empty";
+    empty.textContent = monitorState.run ? "No events yet." : "No run data yet.";
+    els.monitorLog.append(empty);
+    return;
+  }
+
+  for (const event of monitorState.events) {
+    els.monitorLog.append(monitorLogRow(event));
+  }
+
+  if (firstRender || wasAtBottom) {
+    els.monitorLog.scrollTop = els.monitorLog.scrollHeight;
+  }
+}
+
+function monitorLogRow(event) {
+  const row = document.createElement("div");
+  row.className = "log-row";
+  row.dataset.tone = monitorEventTone(event.type);
+
+  const time = document.createElement("span");
+  time.className = "log-time";
+  time.textContent = monitorEventTime(event.at);
+
+  const type = document.createElement("span");
+  type.className = "log-type";
+  type.textContent = event.type || "";
+
+  const text = document.createElement("span");
+  text.className = "log-text";
+  if (event.manuscriptId) {
+    const id = document.createElement("span");
+    id.className = "log-id";
+    id.textContent = event.manuscriptId;
+    text.append(id, document.createTextNode("  "));
+  }
+  text.append(document.createTextNode(monitorEventDetails(event)));
+
+  row.append(time, type, text);
+  return row;
+}
+
+function monitorEventTone(type) {
+  if (!type) {
+    return "default";
+  }
+  if (/rejected_and_sent|run_finished|succeeded|invite_confirmed|^sent$/i.test(type)) {
+    return "ok";
+  }
+  if (/fail|error|not_found|mismatch|loop_detected|limit_reached/i.test(type)) {
+    return "bad";
+  }
+  if (/login|stopped|skip|duplicate|not_actionable|unavailable/i.test(type)) {
+    return "warn";
+  }
+  return "default";
+}
+
+function monitorEventDetails(event) {
+  const parts = [];
+  if (event.status) parts.push(event.status);
+  if (event.reason) parts.push(event.reason);
+  if (event.message) parts.push(event.message);
+  if (event.note) parts.push(event.note);
+
+  const counters = [];
+  if (Number.isFinite(event.checked)) counters.push(`checked ${event.checked}`);
+  if (Number.isFinite(event.rejected)) counters.push(`rejected ${event.rejected}`);
+  if (counters.length) parts.push(`(${counters.join(", ")})`);
+
+  return parts.join(" · ").replace(/\s+/g, " ").trim();
+}
+
+function renderMonitorClocks() {
+  if (monitorState.offline || !monitorState.run) {
+    return;
+  }
+  setMonitorText(els.factStarted, relativeTime(monitorState.run.startedAt));
+  setMonitorText(els.factHeartbeat, relativeTime(monitorState.run.updatedAt));
+}
+
+function setMonitorText(element, value) {
+  element.textContent = value === undefined || value === null || value === "" ? "—" : String(value);
+}
+
+function monitorEventTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--:--:--";
+  }
+  return date.toLocaleTimeString(undefined, { hour12: false });
+}
+
+function secondsSince(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+  return Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
+}
+
+function formatQuietSeconds(seconds) {
+  if (seconds < 60) {
+    return `${seconds}s`;
+  }
+  return `${Math.floor(seconds / 60)} min ${seconds % 60}s`;
+}
+
+function relativeTime(value) {
+  const seconds = secondsSince(value);
+  if (seconds === null) {
+    return null;
+  }
+  if (seconds < 60) {
+    return `${seconds}s ago`;
+  }
+  if (seconds < 3600) {
+    return `${Math.round(seconds / 60)} min ago`;
+  }
+  return new Date(value).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }

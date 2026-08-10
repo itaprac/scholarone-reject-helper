@@ -707,3 +707,245 @@ tr.report-row.selected .report-name {
 .job-history-what { font-weight: 600; }
 .job-history-outcome { color: var(--muted); }
 .job-history li[data-status="failed"] .job-history-outcome { color: var(--danger); }
+
+/* --- Run monitor (zakładka Monitor) --- */
+
+.beacon {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px 28px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.beacon-main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.beacon-dot {
+  position: relative;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.beacon-dot::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  opacity: 0;
+  color: var(--muted);
+}
+
+.beacon-dot[data-state="running"] {
+  background: var(--positive);
+}
+
+/* Puls istnieje tylko wtedy, gdy proces naprawdę żyje — animacja jest daną. */
+.beacon-dot[data-state="running"]::after {
+  color: var(--positive);
+  animation: beacon-pulse 1.6s ease-out infinite;
+}
+
+.beacon-dot[data-state="quiet"] {
+  background: var(--warn);
+}
+
+.beacon-dot[data-state="quiet"]::after {
+  color: var(--warn);
+  animation: beacon-pulse 3.2s ease-out infinite;
+}
+
+.beacon-dot[data-state="finished"] {
+  background: var(--accent);
+}
+
+.beacon-dot[data-state="bad"] {
+  background: var(--danger);
+}
+
+.beacon-dot[data-state="offline"] {
+  background: transparent;
+  border: 2px solid var(--danger);
+}
+
+@keyframes beacon-pulse {
+  0% { transform: scale(0.6); opacity: 0.9; }
+  80% { transform: scale(1.5); opacity: 0; }
+  100% { opacity: 0; }
+}
+
+.beacon-status {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.beacon-note {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 13px;
+  max-width: 52ch;
+}
+
+.beacon-facts {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 4px 26px;
+  margin: 0;
+}
+
+.beacon-facts dt {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.beacon-facts dd {
+  margin: 3px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.monitor-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.monitor-tile {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  padding: 13px 15px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.tile-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tile-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+}
+
+.tile-value-small {
+  align-self: center;
+  font-size: 12.5px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.log-info {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.monitor-log {
+  min-height: 220px;
+  max-height: 46dvh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--log-bg);
+  color: var(--log-text);
+  padding: 10px 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+
+.monitor-log:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.log-empty {
+  padding: 4px 10px;
+  color: oklch(70% 0.02 250);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+}
+
+.log-row {
+  display: flex;
+  gap: 12px;
+  padding: 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-row:hover {
+  background: oklch(28% 0.03 250);
+}
+
+.log-time {
+  flex: none;
+  color: oklch(62% 0.025 250);
+}
+
+.log-type {
+  flex: none;
+  min-width: 24ch;
+  color: oklch(78% 0.1 250);
+}
+
+.log-text {
+  flex: 1;
+}
+
+.log-id {
+  color: var(--log-text);
+  font-weight: 700;
+}
+
+.log-row[data-tone="ok"] .log-type { color: oklch(80% 0.14 150); }
+.log-row[data-tone="warn"] .log-type { color: oklch(82% 0.12 80); }
+.log-row[data-tone="bad"] .log-type { color: oklch(72% 0.16 25); }
+.log-row[data-tone="ok"] { background: oklch(80% 0.14 150 / 0.1); }
+.log-row[data-tone="bad"] { background: oklch(72% 0.16 25 / 0.12); }
+
+@media (max-width: 820px) {
+  .monitor-tiles,
+  .beacon-facts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .beacon {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .log-type {
+    min-width: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beacon-dot::after {
+    animation: none !important;
+  }
+}

@@ -22,6 +22,7 @@
       <button id="rejectTab" class="mode-tab selected" type="button" role="tab" aria-selected="true" aria-controls="rejectPanel">Auto-reject</button>
       <button id="screeningTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="screeningPanel">Initial assessment</button>
       <button id="reviewersTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewersPanel">Reviewers</button>
+      <button id="monitorTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="monitorPanel">Monitor</button>
     </nav>
 
     <main>
@@ -342,6 +343,65 @@
           <div class="actions reviewer-settings-actions">
             <button id="saveReviewerSettingsBtn" type="button">Save reviewer settings</button>
             <span id="reviewerSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
+      </div>
+
+      <div id="monitorPanel" role="tabpanel" aria-labelledby="monitorTab" hidden>
+        <section class="band run-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Diagnostics</p>
+              <h2>Run monitor</h2>
+              <p class="section-copy">Live status of the automation script, including runs started from the CLI or by an agent. Updates every few seconds.</p>
+            </div>
+          </div>
+
+          <div class="beacon">
+            <div class="beacon-main">
+              <span id="beaconDot" class="beacon-dot" data-state="idle" aria-hidden="true"></span>
+              <div>
+                <p id="beaconStatus" class="beacon-status" role="status" aria-live="polite">Connecting…</p>
+                <p id="beaconNote" class="beacon-note">Looking for run data.</p>
+              </div>
+            </div>
+            <dl class="beacon-facts">
+              <div><dt>Mode</dt><dd id="factMode">—</dd></div>
+              <div><dt>PID</dt><dd id="factPid">—</dd></div>
+              <div><dt>Started</dt><dd id="factStarted">—</dd></div>
+              <div><dt>Heartbeat</dt><dd id="factHeartbeat">—</dd></div>
+            </dl>
+          </div>
+
+          <div class="monitor-tiles">
+            <div class="monitor-tile">
+              <span class="tile-label">Checked</span>
+              <strong id="tileChecked" class="tile-value">—</strong>
+            </div>
+            <div class="monitor-tile">
+              <span class="tile-label">Rejected</span>
+              <strong id="tileRejected" class="tile-value">—</strong>
+            </div>
+            <div class="monitor-tile">
+              <span class="tile-label">Result</span>
+              <strong id="tileResult" class="tile-value tile-value-small">—</strong>
+            </div>
+            <div class="monitor-tile">
+              <span class="tile-label">Run ID</span>
+              <strong id="tileRunId" class="tile-value tile-value-small">—</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="band">
+          <div class="section-title">
+            <div>
+              <h2>Event log</h2>
+            </div>
+            <span id="monitorLogInfo" class="log-info">tail of the run log</span>
+          </div>
+          <div id="monitorLog" class="monitor-log" tabindex="0">
+            <p class="log-empty">No run data yet.</p>
           </div>
         </section>
       </div>

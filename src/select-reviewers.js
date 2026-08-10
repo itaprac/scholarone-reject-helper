@@ -38,6 +38,7 @@ import {
   positiveInteger,
 } from "./core/env.js";
 import { createLogger, waitUntilInterrupted } from "./core/logger.js";
+import { createRunStatus } from "./core/run-status.js";
 import { readLoginFailureText } from "./core/login.js";
 import { TIMEOUTS } from "./core/timeouts.js";
 import {
@@ -107,7 +108,19 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
   const runId = new Date().toISOString().replace(/[:.]/g, "-");
   const logFile = path.join(config.logsDir, `select-reviewers-${runId}.jsonl`);
   const screenshotDir = path.join(config.logsDir, "screenshots", `select-reviewers-${runId}`);
-  const log = createLogger(logFile);
+  const writeLog = createLogger(logFile);
+  const runStatus = createRunStatus({
+    logsDir: config.logsDir,
+    runId: `select-reviewers-${runId}`,
+    pid: process.pid,
+    mode: "reviewers",
+    logFile: path.relative(projectRoot, logFile).split(path.sep).join("/"),
+  });
+  const log = async (type, payload = {}) => {
+    await writeLog(type, payload);
+    await runStatus(type, payload);
+  };
+  await runStatus("run_prepared", {});
 
   await fsp.mkdir(screenshotDir, { recursive: true });
   const screenshots = createScreenshotWriter({

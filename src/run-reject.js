@@ -2,6 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { createBrowserSession } from "./core/browser.js";
 import { createLogger, waitUntilInterrupted } from "./core/logger.js";
+import { createRunStatus } from "./core/run-status.js";
 import { ensureLoggedIn as ensureCoreLoggedIn } from "./core/login.js";
 import { pruneLogs } from "./core/log-retention.js";
 import { createScreenshotWriter } from "./core/screenshots.js";
@@ -36,7 +37,21 @@ export async function runReject(rawArgs = process.argv.slice(2)) {
   await fsp.mkdir(screenshotDir, { recursive: true });
   await fsp.mkdir(reportDir, { recursive: true });
 
-  const logEvent = createLogger(logFile, { echo: false });
+  const writeLog = createLogger(logFile, { echo: false });
+  const runStatus = createRunStatus({
+    logsDir: config.logsDir,
+    runId,
+    pid: process.pid,
+    mode: describeMode(config),
+    logFile: path.relative(path.resolve(config.logsDir, ".."), logFile).split(path.sep).join("/"),
+  });
+  const logEvent = async (type, payload = {}) => {
+    await writeLog(type, payload);
+    await runStatus(type, payload);
+  };
+  // Puls zapisuje się od razu, zanim ruszy przeglądarka — start Playwrighta
+  // potrafi trwać kilka sekund i bez tego panel widziałby "brak przebiegu".
+  await runStatus("run_prepared", {});
   const screenshots = createScreenshotWriter({
     directory: screenshotDir,
     debug: config.debugScreenshots,
@@ -132,6 +147,17 @@ function selectWorkflow(config) {
   if (config.collectMetadata) return runMetadataCollection;
   if (config.rejectFromReport || config.rejectIds.length) return runRejectTargetsFromSearch;
   return runScan;
+}
+
+function describeMode(config) {
+  if (config.screeningFromRun) return "screening-from-run";
+  if (config.collectMetadata) {
+    return config.applyAssessmentDecisions ? "screening-live" : "screening-dryrun";
+  }
+  if (config.rejectFromReport || config.rejectIds.length) return "reject-from-report";
+  if (config.reportOnly) return "reject-dryrun";
+  if (config.saveAndSend) return "live-reject";
+  return "scan";
 }
 
 function describeRun(config) {
