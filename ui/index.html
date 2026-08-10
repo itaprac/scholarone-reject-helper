@@ -13,11 +13,19 @@
       </div>
       <div class="topbar-status">
         <p id="statusLine" role="status" aria-live="polite">Ready</p>
+        <p id="doctorLine" class="doctor-line" hidden></p>
         <button id="refreshBtn" type="button">Refresh</button>
       </div>
     </header>
 
+    <nav class="mode-tabs" role="tablist" aria-label="Workflow">
+      <button id="rejectTab" class="mode-tab selected" type="button" role="tab" aria-selected="true" aria-controls="rejectPanel">Auto-reject</button>
+      <button id="screeningTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="screeningPanel">Initial assessment</button>
+      <button id="reviewersTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewersPanel">Reviewers</button>
+    </nav>
+
     <main>
+      <div id="rejectPanel" role="tabpanel" aria-labelledby="rejectTab">
       <section class="band run-section">
         <div class="section-title">
           <div>
@@ -104,34 +112,254 @@
         </div>
       </section>
 
+      <section class="band message-section">
+        <details class="folded-settings">
+          <summary>
+            <span>Reject email body</span>
+            <span id="settingsStatus" class="fold-status" role="status" aria-live="polite">Not saved</span>
+          </summary>
+          <p class="section-copy">This text is used for live and report-based rejection runs.</p>
+          <label class="message-label">
+            <span class="sr-only">Reject email body</span>
+            <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
+          </label>
+          <div class="actions">
+            <button id="saveSettingsBtn" type="button">Save settings</button>
+            <button id="resetSettingsBtn" type="button">Reset saved settings</button>
+          </div>
+        </details>
+      </section>
+      </div>
+
+      <div id="screeningPanel" role="tabpanel" aria-labelledby="screeningTab" hidden>
+        <section class="band run-section screening-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Assessment workflow, stage 2</p>
+              <h2>Collect metadata and assess manuscripts</h2>
+              <p class="section-copy">Scan the Complete Checklist queue, collect every eligible title and abstract, assess each paper with Codex CLI, and save one batch JSON.</p>
+            </div>
+          </div>
+
+          <div class="form-grid screening-core-settings">
+            <label>
+              Scan scope
+              <select id="screeningScope">
+                <option value="all" selected>Entire queue</option>
+                <option value="limited">Use safety limit</option>
+              </select>
+            </label>
+            <label>
+              Safety limit
+              <input id="screeningMaxChecked" type="number" min="1" max="100" value="10">
+            </label>
+            <label>
+              Codex model
+              <input id="assessmentModel" type="text" value="gpt-5.6-terra" required>
+            </label>
+            <label>
+              Reasoning effort
+              <select id="assessmentReasoningEffort">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="operation-strip" aria-live="polite">
+            <div>
+              <span class="selection-label">Execution mode</span>
+              <strong>Dry run records results; live run submits decisions</strong>
+            </div>
+            <span class="operation-note">Live APPROVE completes both checklist items and assigns Wojciech Sałabun as EIC and AE. Live REJECT sends the configured rejection email.</span>
+          </div>
+
+          <label class="checkbox-line">
+            <input id="screeningApproveWithoutAssign" type="checkbox">
+            Approve without assigning editors — approved papers stay in Awaiting EIC Assignment so a human can review the PDF and assign editors manually. Revisions are still fully assigned.
+          </label>
+
+          <details class="folded-settings">
+            <summary><span>Assessment rules</span></summary>
+            <label class="assessment-prompt-label">
+              <span class="sr-only">Assessment rules</span>
+              <textarea id="assessmentPrompt" rows="16" required spellcheck="true"></textarea>
+              <span>The helper appends the manuscript title, abstract, and a strict JSON output contract. Save with “Save assessment settings”.</span>
+            </label>
+          </details>
+
+          <label class="assessment-prompt-label">
+            Live rejection email
+            <textarea id="screeningRejectMessage" rows="10" required spellcheck="true"></textarea>
+            <span>This message is used only by Initial assessment → Live REJECT. It does not change the older Auto-reject template.</span>
+          </label>
+
+          <details class="advanced-settings">
+            <summary>Advanced assessment settings</summary>
+            <div class="form-grid">
+              <label class="wide">
+                Start URL
+                <input id="screeningStartUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+              </label>
+              <label>
+                Slow ms
+                <input id="screeningSlowMo" type="number" min="0" value="500">
+              </label>
+              <label>
+                LLM timeout (seconds)
+                <input id="assessmentTimeoutSeconds" type="number" min="10" max="600" value="120">
+              </label>
+            </div>
+          </details>
+
+          <div class="actions run-actions">
+            <button id="screeningDryRunBtn" type="button" class="primary">Run assessment dry run</button>
+            <button id="screeningLiveRunBtn" type="button" class="danger">Run live decisions</button>
+          </div>
+          <p class="action-help">Both modes save one batch JSON in <code>logs/screening/</code>. Live mode performs externally consequential ScholarOne actions and stops on the first unconfirmed step.</p>
+
+          <div class="actions reviewer-settings-actions">
+            <button id="saveScreeningSettingsBtn" type="button">Save assessment settings</button>
+            <span id="screeningSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
+
+        <section class="band results-section">
+          <div class="section-title">
+            <div>
+              <h2>Assessment results</h2>
+              <p class="section-copy">Review decisions from a saved run, then execute them. No need to open files in <code>logs/screening/</code>.</p>
+            </div>
+            <button id="refreshScreeningRunsBtn" type="button">Refresh</button>
+          </div>
+
+          <div class="results-controls">
+            <label>Run
+              <select id="screeningRunSelect"></select>
+            </label>
+            <label>Decision
+              <select id="screeningDecisionFilter">
+                <option value="">All</option>
+                <option value="APPROVE">APPROVE</option>
+                <option value="REJECT">REJECT</option>
+                <option value="ERROR">Errors</option>
+              </select>
+            </label>
+            <strong id="screeningRunSummary" aria-live="polite">No run selected</strong>
+          </div>
+
+          <div class="run-action-bar">
+            <div>
+              <span class="selection-label">Selected run</span>
+              <strong id="screeningRunSelection" aria-live="polite">No run selected</strong>
+            </div>
+            <button id="executeRunBtn" type="button" class="danger" disabled>Execute these decisions</button>
+          </div>
+          <p class="action-help">Applies the decisions above without asking the model again. Manuscripts already handled are skipped.</p>
+
+          <div class="table-wrap">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th scope="col">Manuscript</th>
+                  <th scope="col">Decision</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">Tokens</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody id="screeningResultsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="reviewersPanel" role="tabpanel" aria-labelledby="reviewersTab" hidden>
+        <section class="band run-section reviewer-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Reviewer workflow</p>
+              <h2>Select and invite reviewers</h2>
+              <p class="section-copy">Process papers sequentially. Each paper must reach the reviewer target and pass invitation verification before the next one starts.</p>
+            </div>
+          </div>
+
+          <div class="form-grid reviewer-core-settings">
+            <label>
+              Source queue
+              <select id="reviewerQueue">
+                <option value="combined" selected>Combined: Invite, then Select</option>
+                <option value="select">Select Reviewers</option>
+                <option value="invite">Invite Reviewers</option>
+              </select>
+            </label>
+            <label>
+              Papers this run
+              <input id="reviewerMaxManuscripts" type="number" min="1" max="50" value="3">
+            </label>
+            <label>
+              Reviewers per paper
+              <input id="reviewersPerPaper" type="number" min="1" max="50" value="10">
+            </label>
+          </div>
+
+          <div class="operation-strip" aria-live="polite">
+            <div>
+              <span class="selection-label">Planned batch</span>
+              <strong id="reviewerBatchSummary">Up to 3 papers, 10 reviewers each, from Combined queue</strong>
+            </div>
+            <span class="operation-note">Combined resumes Invite Reviewers first, then takes new papers from Select Reviewers.</span>
+          </div>
+
+          <details class="advanced-settings">
+            <summary>Advanced reviewer settings</summary>
+            <div class="form-grid">
+              <label class="wide">
+                Start URL
+                <input id="reviewerStartUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+              </label>
+              <label>
+                Slow ms
+                <input id="reviewerSlowMo" type="number" min="0" value="500">
+              </label>
+              <label>
+                Refresh wait (seconds)
+                <input id="reviewerRefreshWaitSeconds" type="number" min="1" max="3600" value="60">
+              </label>
+              <label class="checkbox-line">
+                <input id="reviewerKeepOpen" type="checkbox">
+                Keep browser open after batch
+              </label>
+            </div>
+          </details>
+
+          <div class="actions run-actions">
+            <button id="inviteReviewersBtn" type="button" class="danger">Select + invite</button>
+          </div>
+          <p class="action-help">Selects reviewers and sends invitations. Every paper is verified by reviewer status before the next one starts. Sending cannot be undone.</p>
+
+          <div class="actions reviewer-settings-actions">
+            <button id="saveReviewerSettingsBtn" type="button">Save reviewer settings</button>
+            <span id="reviewerSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
+      </div>
+
       <section class="band job-section">
         <div class="section-title">
           <div>
-            <p class="eyebrow">3. Monitor</p>
-            <h2>Job</h2>
+            <p class="eyebrow">Monitor</p>
+            <h2>Current job</h2>
           </div>
           <button id="stopBtn" type="button" disabled>Stop</button>
         </div>
+        <p id="jobProgress" class="job-progress" role="status" aria-live="polite" hidden>—</p>
         <pre id="jobOutput">No active job.</pre>
-      </section>
-
-      <section class="band message-section">
-        <div class="section-title">
-          <div>
-            <p class="eyebrow">Message</p>
-            <h2>Reject email body</h2>
-            <p class="section-copy">This text is used for live and report-based rejection runs.</p>
-          </div>
-          <span id="settingsStatus" role="status" aria-live="polite">Not saved</span>
-        </div>
-        <label class="message-label">
-          <span class="sr-only">Reject email body</span>
-          <textarea id="rejectMessage" rows="13" spellcheck="true"></textarea>
-        </label>
-        <div class="actions">
-          <button id="saveSettingsBtn" type="button">Save settings</button>
-          <button id="resetSettingsBtn" type="button">Reset saved settings</button>
-        </div>
+        <details class="folded-settings run-history">
+          <summary><span>Recent runs</span></summary>
+          <ul id="jobHistory" class="job-history"></ul>
+        </details>
       </section>
     </main>
 

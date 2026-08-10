@@ -5,15 +5,23 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { buildJobArgs } from "./job-args.js";
+import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
+import { buildPublicConfig, normalizeUiSettings } from "./config/ui-settings.js";
+import { describeFields } from "./config/options.js";
+import { runDoctorChecks } from "./doctor.js";
+import { applyProgressLine, createProgressState } from "./job-progress.js";
+import { tailSince } from "./job-tail.js";
+import { listScreeningRuns, readScreeningRun } from "./screening-runs.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 const uiRoot = path.join(projectRoot, "ui");
 const reportsDir = path.join(projectRoot, "logs", "reports");
 const autoRejectScript = path.join(projectRoot, "src", "auto-reject.js");
+const scholarOneScript = path.join(projectRoot, "src", "scholarone.js");
 const settingsPath = path.join(projectRoot, "ui-settings.json");
+const jobsDir = path.join(projectRoot, "logs", "jobs");
 const preferredPort = Number.parseInt(process.env.UI_PORT || "3131", 10);
 const maxPort = preferredPort + 20;
 const listenHost = "127.0.0.1";
@@ -36,6 +44,30 @@ const server = http.createServer(async (req, res) => {
         reports: await listReports(),
         activeJob: activeJobId ? publicJob(jobs.get(activeJobId)) : null,
       });
+    }
+
+    // Opis pól formularza pochodzi z tej samej definicji co walidacja i
+    // argumenty CLI, więc panel nie może pokazać opcji, której backend nie zna.
+    if (url.pathname === "/api/fields" && req.method === "GET") {
+      return sendJson(res, {
+        reject: describeFields("live"),
+        screening: describeFields("screening"),
+        reviewers: describeFields("reviewers-invite"),
+      });
+    }
+
+    if (url.pathname === "/api/screening/runs" && req.method === "GET") {
+      return sendJson(res, { runs: await listScreeningRuns(path.join(projectRoot, "logs")) });
+    }
+
+    const screeningMatch = url.pathname.match(/^\/api\/screening\/runs\/([^/]+)$/);
+    if (screeningMatch && req.method === "GET") {
+      const run = await readScreeningRun(path.join(projectRoot, "logs"), decodeURIComponent(screeningMatch[1]));
+      return sendJson(res, { run });
+    }
+
+    if (url.pathname === "/api/doctor" && req.method === "GET") {
+      return sendJson(res, { checks: await runDoctorChecks() });
     }
 
     if (url.pathname === "/api/settings" && req.method === "POST") {
@@ -73,10 +105,52 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, { job: startJob("reject-from-report", args) });
     }
 
+    if (url.pathname === "/api/run/reviewers/invite" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "reviewers-invite");
+      const args = buildReviewerJobArgs("reviewers-invite", body);
+      return sendJson(res, { job: startJob("reviewers-invite", args, scholarOneScript) });
+    }
+
+    if (url.pathname === "/api/run/screening/collect" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "screening");
+      const args = buildScreeningJobArgs(body);
+      return sendJson(res, { job: startJob("initial-assessment-dryrun", args) });
+    }
+
+    if (url.pathname === "/api/run/screening/live" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      body.screeningLive = true;
+      validateRunOptions(body, "screening");
+      const args = buildScreeningJobArgs(body, { applyDecisions: true });
+      return sendJson(res, { job: startJob("initial-assessment-live", args) });
+    }
+
+    if (url.pathname === "/api/run/screening/execute" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const runPath = resolveScreeningRunPath(body.run);
+      const args = ["--headed", `--from-run=${relativeProjectPath(runPath)}`];
+      if (body.screeningApproveWithoutAssign) {
+        args.push("--approve-without-assign");
+      }
+      return sendJson(res, { job: startJob("initial-assessment-from-run", args) });
+    }
+
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
     if (jobMatch && req.method === "GET") {
       const job = jobs.get(jobMatch[1]);
-      return sendJson(res, { job: publicJob(job) });
+      const since = Number.parseInt(url.searchParams.get("since") || "", 10);
+      return sendJson(res, { job: publicJob(job, { since }) });
+    }
+
+    const streamMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/stream$/);
+    if (streamMatch && req.method === "GET") {
+      return streamJob(res, jobs.get(streamMatch[1]));
+    }
+
+    if (url.pathname === "/api/jobs" && req.method === "GET") {
+      return sendJson(res, { jobs: await listJobHistory() });
     }
 
     const stopMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/stop$/);
@@ -128,6 +202,11 @@ async function listReports() {
     const stat = await fsp.stat(absolutePath);
     const payload = await readJsonFile(absolutePath);
     const result = payload?.result || {};
+
+    // Przebiegi wyboru recenzentów zapisują się do tego samego katalogu, ale
+    // nie mają czego odrzucać. Bez tego filtra zajmowały większość tabeli
+    // wierszami z zerami, których nie da się użyć.
+    if (!result.report) continue;
     const summary = result.summary || buildSummaryFromResult(result);
     const progressPath = absolutePath.replace(/\.json$/i, ".progress.json");
     const progress = await readJsonFile(progressPath);
@@ -154,36 +233,12 @@ async function publicConfig() {
   return {
     settingsPath: relativeProjectPath(settingsPath),
     settingsSaved: fs.existsSync(settingsPath),
-    startUrl: saved.startUrl ?? envValue("START_URL", "https://mc.manuscriptcentral.com/kes"),
-    maxChecked: saved.maxChecked ?? envValue("MAX_CHECKED", "50"),
-    submittedOlderThanDays: saved.submittedOlderThanDays ?? envValue("SUBMITTED_OLDER_THAN_DAYS", "30"),
-    queueStartPage: saved.queueStartPage ?? envValue("QUEUE_START_PAGE", ""),
-    slowMo: saved.slowMo ?? envValue("SLOW_MO", "500"),
-    maxRejected: saved.maxRejected ?? envValue("MAX_REJECTED", ""),
-    keepOpen: saved.keepOpen ?? parseBool(envValue("KEEP_OPEN", ""), false),
-    rejectMessage: saved.rejectMessage ?? loadRejectMessage(),
+    ...buildPublicConfig({ saved, envValue, rejectMessage: loadRejectMessage }),
   };
 }
 
 async function saveUiSettings(body) {
-  const settings = {
-    startUrl: String(body.startUrl || "").trim(),
-    maxChecked: normalizeIntegerSetting(body.maxChecked, "50"),
-    submittedOlderThanDays: normalizeIntegerSetting(body.submittedOlderThanDays, "30"),
-    queueStartPage: normalizeOptionalIntegerSetting(body.queueStartPage),
-    slowMo: normalizeIntegerSetting(body.slowMo, "500", 0),
-    maxRejected: normalizeOptionalIntegerSetting(body.maxRejected),
-    keepOpen: Boolean(body.keepOpen),
-    rejectMessage: String(body.rejectMessage || "").trimEnd(),
-  };
-
-  if (!settings.startUrl) {
-    settings.startUrl = "https://mc.manuscriptcentral.com/kes";
-  }
-  if (!settings.rejectMessage) {
-    settings.rejectMessage = loadRejectMessage();
-  }
-
+  const settings = normalizeUiSettings(body, { rejectMessage: loadRejectMessage });
   await fsp.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
@@ -203,7 +258,7 @@ async function readJsonFile(filePath) {
   }
 }
 
-function startJob(type, args) {
+function startJob(type, args, script = autoRejectScript) {
   const running = activeJobId ? jobs.get(activeJobId) : null;
   if (running && ["running", "stopping"].includes(running.status)) {
     const error = new Error(`Job ${activeJobId} is still running.`);
@@ -212,7 +267,7 @@ function startJob(type, args) {
   }
 
   const id = String(nextJobId++);
-  const child = spawn(process.execPath, [autoRejectScript, ...args], {
+  const child = spawn(process.execPath, [script, ...args], {
     cwd: projectRoot,
     env: process.env,
   });
@@ -226,6 +281,12 @@ function startJob(type, args) {
     finishedAt: null,
     exitCode: null,
     output: "",
+    // Licznik bajtów rośnie także wtedy, gdy bufor jest przycinany — dzięki
+    // temu klient może dopytywać o sam ogon zamiast pobierać całość co 1,5 s.
+    offset: 0,
+    progress: createProgressState(),
+    subscribers: new Set(),
+    partialLine: "",
     child,
   };
 
@@ -233,15 +294,30 @@ function startJob(type, args) {
   activeJobId = id;
 
   const append = (chunk) => {
-    job.output += chunk.toString();
+    const text = chunk.toString();
+    job.output += text;
+    // Offset liczony w znakach, nie w bajtach — musi być w tej samej jednostce
+    // co job.output.length, bo na tej różnicy opiera się wycinanie ogona.
+    // Polskie znaki w logach zajmują 2 bajty, więc licznik bajtowy ucinałby
+    // przyrost w złym miejscu.
+    job.offset += text.length;
     if (job.output.length > 120_000) {
       job.output = job.output.slice(-120_000);
     }
+
+    // Postęp liczymy z pełnych linii; ostatni, urwany fragment czeka na resztę.
+    const lines = (job.partialLine + text).split(/\r?\n/);
+    job.partialLine = lines.pop() || "";
+    for (const line of lines) {
+      applyProgressLine(job.progress, line);
+    }
+
+    broadcast(job, { type: "output", chunk: text, offset: job.offset, progress: job.progress });
   };
 
   child.stdout.on("data", append);
   child.stderr.on("data", append);
-  child.on("close", (code) => {
+  child.on("close", async (code) => {
     job.status = job.status === "stopping" ? "stopped" : code === 0 ? "finished" : "failed";
     job.exitCode = code;
     job.finishedAt = new Date().toISOString();
@@ -249,15 +325,64 @@ function startJob(type, args) {
     if (activeJobId === id) {
       activeJobId = null;
     }
+
+    broadcast(job, { type: "status", job: publicJob(job) });
+    for (const response of job.subscribers) response.end();
+    job.subscribers.clear();
+
+    await persistJob(job).catch(() => undefined);
   });
 
   return publicJob(job);
 }
 
-function publicJob(job) {
+function broadcast(job, payload) {
+  for (const response of job.subscribers) {
+    response.write(`data: ${JSON.stringify(payload)}\n\n`);
+  }
+}
+
+// Joby żyły dotąd wyłącznie w pamięci — restart panelu kasował historię i
+// zrywał związek między uruchomieniem a plikami, które wyprodukowało.
+async function persistJob(job) {
+  await fsp.mkdir(jobsDir, { recursive: true });
+  await fsp.writeFile(
+    path.join(jobsDir, `${job.id}.json`),
+    `${JSON.stringify({ ...publicJob(job), progress: job.progress }, null, 2)}\n`,
+    "utf8"
+  );
+}
+
+async function listJobHistory(limit = 20) {
+  const files = await fsp.readdir(jobsDir).catch(() => []);
+  const entries = [];
+
+  for (const filename of files.filter((name) => name.endsWith(".json"))) {
+    const payload = await readJsonFile(path.join(jobsDir, filename));
+    if (!payload) continue;
+    entries.push({
+      id: payload.id,
+      type: payload.type,
+      status: payload.status,
+      startedAt: payload.startedAt,
+      finishedAt: payload.finishedAt,
+      exitCode: payload.exitCode,
+      progress: payload.progress || null,
+    });
+  }
+
+  return entries
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+    .slice(0, limit);
+}
+
+function publicJob(job, { since = Number.NaN } = {}) {
   if (!job) {
     return null;
   }
+
+  // Klient, który podał znany mu offset, dostaje tylko przyrost.
+  const output = tailSince(job.output, job.offset, since);
 
   return {
     id: job.id,
@@ -267,24 +392,36 @@ function publicJob(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     exitCode: job.exitCode,
-    output: job.output,
+    output,
+    offset: job.offset,
+    progress: job.progress,
   };
 }
 
-function normalizeIntegerSetting(value, fallback, minimum = 1) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < minimum) {
-    return fallback;
-  }
-  return String(parsed);
-}
 
-function normalizeOptionalIntegerSetting(value) {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) {
-    return "";
+
+function streamJob(res, job) {
+  if (!job) {
+    res.writeHead(404);
+    res.end();
+    return undefined;
   }
-  return String(parsed);
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-store",
+    connection: "keep-alive",
+  });
+
+  res.write(`data: ${JSON.stringify({ type: "snapshot", job: publicJob(job) })}\n\n`);
+
+  if (job.status === "running" || job.status === "stopping") {
+    job.subscribers.add(res);
+    res.on("close", () => job.subscribers.delete(res));
+  } else {
+    res.end();
+  }
+  return undefined;
 }
 
 function envValue(key, fallback = "") {
@@ -313,12 +450,6 @@ function loadRejectMessage() {
   return DEFAULT_REJECT_MESSAGE;
 }
 
-function parseBool(value, fallback = false) {
-  if (value === undefined || value === null || value === "") {
-    return fallback;
-  }
-  return /^(1|true|yes|y|on)$/i.test(String(value).trim());
-}
 
 function loadEnvFile(filePath) {
   try {
@@ -352,6 +483,30 @@ function resolveReportPath(value) {
     throw new Error("Raport musi byc plikiem JSON/CSV z logs/reports.");
   }
   return absolutePath;
+}
+
+// Ścieżka musi wskazywać plik wyniku w logs/screening — bez tego panel mógłby
+// kazać wykonać dowolny plik z dysku.
+function resolveScreeningRunPath(value) {
+  if (!value) throw badRequest("Wybierz zapisany przebieg oceny.");
+
+  const screeningDir = path.join(projectRoot, "logs", "screening");
+  const absolutePath = path.resolve(screeningDir, path.basename(String(value)));
+  const relative = path.relative(screeningDir, absolutePath);
+
+  if (relative.startsWith("..") || path.isAbsolute(relative) || !/\.json$/i.test(absolutePath)) {
+    throw badRequest("Przebieg musi byc plikiem JSON z logs/screening.");
+  }
+  if (!fs.existsSync(absolutePath)) {
+    throw badRequest("Nie znaleziono wskazanego przebiegu oceny.");
+  }
+  return absolutePath;
+}
+
+function badRequest(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
 }
 
 function relativeProjectPath(filePath) {

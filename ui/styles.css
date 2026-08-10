@@ -10,6 +10,10 @@
   --accent-soft: oklch(96% 0.025 250);
   --focus: oklch(47% 0.125 250 / 0.25);
   --danger: oklch(46% 0.14 28);
+  /* Stan pozytywny w tabeli decyzji. Chroma celowo niska: to informacja,
+     nie akcent — Control Blue zostaje jedynym głosem interakcji. */
+  --positive: oklch(48% 0.09 150);
+  --warn: oklch(52% 0.11 70);
   --danger-bg: oklch(94% 0.025 24);
   --danger-line: oklch(78% 0.06 25);
   --log-bg: oklch(22% 0.025 250);
@@ -29,7 +33,8 @@ body {
 
 button,
 input,
-textarea {
+textarea,
+select {
   font: inherit;
 }
 
@@ -63,6 +68,33 @@ tr.report-row {
   padding: 12px 24px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
+}
+
+.mode-tabs {
+  display: flex;
+  gap: 4px;
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding-top: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.mode-tab {
+  min-height: 38px;
+  margin-bottom: -1px;
+  border-color: transparent;
+  border-bottom-color: var(--line);
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 7px 14px;
+}
+
+.mode-tab.selected {
+  border-color: var(--line);
+  border-bottom-color: var(--bg);
+  background: var(--bg);
+  color: var(--text);
 }
 
 .product-title,
@@ -155,6 +187,33 @@ main {
   max-width: 880px;
 }
 
+.reviewer-core-settings {
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(160px, 1fr));
+  max-width: 900px;
+}
+
+.screening-core-settings {
+  grid-template-columns: repeat(4, minmax(170px, 260px));
+  max-width: 1060px;
+}
+
+.assessment-prompt-label {
+  margin-top: 18px;
+  max-width: 880px;
+}
+
+.assessment-prompt-label > span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+#assessmentPrompt {
+  min-height: 150px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
 label {
   display: grid;
   gap: 5px;
@@ -175,7 +234,8 @@ label {
 }
 
 input,
-textarea {
+textarea,
+select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -188,6 +248,10 @@ input {
   min-height: 38px;
 }
 
+select {
+  min-height: 38px;
+}
+
 input[type="checkbox"] {
   width: 16px;
   min-height: 16px;
@@ -196,6 +260,7 @@ input[type="checkbox"] {
 
 input:focus-visible,
 textarea:focus-visible,
+select:focus-visible,
 button:focus-visible,
 summary:focus-visible,
 tr.report-row:focus-visible {
@@ -204,7 +269,8 @@ tr.report-row:focus-visible {
 }
 
 input:focus-visible,
-textarea:focus-visible {
+textarea:focus-visible,
+select:focus-visible {
   border-color: var(--accent);
 }
 
@@ -316,6 +382,35 @@ button.danger:hover:not(:disabled) {
   margin-top: 7px;
 }
 
+.operation-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 16px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--soft);
+}
+
+.operation-strip > div {
+  display: grid;
+  gap: 2px;
+}
+
+.operation-note,
+#reviewerSettingsStatus {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.reviewer-settings-actions {
+  margin-top: 20px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 .table-wrap {
   overflow-x: auto;
   border: 1px solid var(--line);
@@ -387,7 +482,8 @@ tr.report-row.selected .report-name {
   text-align: center;
 }
 
-.report-action-bar {
+.report-action-bar,
+.run-action-bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -399,7 +495,8 @@ tr.report-row.selected .report-name {
   background: var(--surface);
 }
 
-.report-action-bar > div {
+.report-action-bar > div,
+.run-action-bar > div {
   display: grid;
   gap: 2px;
 }
@@ -432,7 +529,8 @@ tr.report-row.selected .report-name {
   }
 
   .form-grid,
-  .core-settings {
+  .core-settings,
+  .reviewer-core-settings {
     grid-template-columns: repeat(2, minmax(130px, 1fr));
   }
 
@@ -444,7 +542,8 @@ tr.report-row.selected .report-name {
 @media (max-width: 520px) {
   .topbar,
   .topbar-status,
-  .report-action-bar {
+  .report-action-bar,
+.run-action-bar {
     align-items: flex-start;
   }
 
@@ -454,7 +553,8 @@ tr.report-row.selected .report-name {
   }
 
   .form-grid,
-  .core-settings {
+  .core-settings,
+  .reviewer-core-settings {
     grid-template-columns: 1fr;
   }
 
@@ -463,11 +563,14 @@ tr.report-row.selected .report-name {
   }
 
   .section-title,
-  .report-action-bar {
+  .report-action-bar,
+  .run-action-bar,
+  .operation-strip {
     flex-direction: column;
   }
 
-  .report-action-bar button {
+  .report-action-bar button,
+  .run-action-bar button {
     width: 100%;
   }
 
@@ -484,3 +587,123 @@ tr.report-row.selected .report-name {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Podsumowanie postępu nad strumieniem logu. */
+.job-progress {
+  margin: 0 0 8px;
+  font: 500 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+/* Wynik preflightu; widoczny tylko, gdy coś wymaga uwagi. */
+.doctor-line {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+/* Tabela wyników oceny LLM. */
+.results-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: end;
+  margin-bottom: 12px;
+}
+
+/* Stałe szerokości kolumn: bez nich długie tytuły artykułów rozpychały
+   pierwszą kolumnę i wypychały decyzję oraz uzasadnienie poza ekran. */
+.results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+  table-layout: fixed;
+}
+.results-table th:nth-child(1), .results-table td:nth-child(1) { width: 38%; }
+.results-table th:nth-child(2), .results-table td:nth-child(2) { width: 10%; }
+.results-table th:nth-child(3), .results-table td:nth-child(3) { width: 30%; }
+.results-table th:nth-child(4), .results-table td:nth-child(4) { width: 8%; }
+.results-table th:nth-child(5), .results-table td:nth-child(5) { width: 14%; }
+/* Globalne td ma white-space: nowrap — tu musi zawijać, bo uzasadnienia
+   decyzji potrafią mieć kilka zdań i nachodziłyby na sąsiednie kolumny. */
+.results-table td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.results-table th,
+.results-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.results-table td.numeric { text-align: right; font-variant-numeric: tabular-nums; }
+
+.results-table td[data-decision="REJECT"] { color: var(--danger); font-weight: 600; }
+.results-table td[data-decision="APPROVE"] { color: var(--positive); font-weight: 600; }
+.results-table td[data-decision="ERROR"] { color: var(--warn); font-weight: 600; }
+
+.row-subtitle { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+.row-abstract { margin: 6px 0 0; font-size: 13px; color: var(--muted); max-width: 70ch; }
+.table-wrap { overflow-x: auto; }
+
+/* Zwijane sekcje dla rzeczy edytowanych rzadko: treść maila, prompt oceny,
+   historia uruchomień. Zwinięte nie konkurują z codziennym przepływem. */
+.folded-settings > summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  padding: 10px 0;
+  font-weight: 650;
+  font-size: 15px;
+  color: var(--text);
+}
+
+/* display:flex usuwa domyslny ::marker, wiec bez tego sekcja wyglada jak zwykly
+   naglowek i nie widac, ze da sie ja rozwinac. */
+.folded-settings > summary::-webkit-details-marker { display: none; }
+.folded-settings > summary > span:first-child::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  color: var(--muted);
+}
+.folded-settings[open] > summary > span:first-child::before { content: "▾"; }
+
+.folded-settings > summary:hover { color: var(--accent); }
+.folded-settings > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.folded-settings .fold-status {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.job-history {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.job-history li {
+  display: grid;
+  grid-template-columns: 150px 1fr auto;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.job-history li:last-child { border-bottom: 0; }
+.job-history-when { color: var(--muted); font-variant-numeric: tabular-nums; }
+.job-history-what { font-weight: 600; }
+.job-history-outcome { color: var(--muted); }
+.job-history li[data-status="failed"] .job-history-outcome { color: var(--danger); }

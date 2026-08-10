@@ -1,64 +1,76 @@
-const OPTION_MAPPINGS = {
-  dryrun: {
-    "start-url": "startUrl",
-    "max-checked": "maxChecked",
-    "submitted-older-than-days": "submittedOlderThanDays",
-    "queue-start-page": "queueStartPage",
-    "slow-mo": "slowMo",
-  },
-  live: {
-    "start-url": "startUrl",
-    "max-checked": "maxChecked",
-    "submitted-older-than-days": "submittedOlderThanDays",
-    "queue-start-page": "queueStartPage",
-    "max-rejected": "maxRejected",
-    "slow-mo": "slowMo",
-    "reject-message": "rejectMessage",
-  },
-  "send-from-report": {
-    "start-url": "startUrl",
-    "submitted-older-than-days": "submittedOlderThanDays",
-    "max-rejected": "maxRejected",
-    "slow-mo": "slowMo",
-    "reject-message": "rejectMessage",
-  },
-};
+import { field, modeDefinition } from "./config/options.js";
 
+// Budowanie argumentów CLI dla zadania uruchamianego z panelu. Kolejność bierze
+// się wprost z definicji trybu w config/options.js — nie ma tu drugiej listy,
+// która mogłaby się z nią rozjechać.
 export function buildJobArgs(mode, body, { report = "" } = {}) {
-  const mapping = OPTION_MAPPINGS[mode];
-  if (!mapping) {
-    throw new Error(`Nieznany tryb uruchomienia: ${mode}`);
-  }
+  const definition = modeDefinition(mode);
 
-  const args = ["--headed"];
-  if (mode === "dryrun") {
-    args.push("--dry-run");
-  } else {
-    args.push("--save-and-send");
-  }
-
-  if (mode === "send-from-report") {
+  const args = [...definition.flags];
+  if (definition.requiresReport) {
     if (!report) {
       throw new Error("Tryb send-from-report wymaga raportu.");
     }
     args.push("--require-targets", `--reject-from-report=${report}`);
   }
 
-  args.push(...optionArgs(body, mapping));
-  if (body.keepOpen) {
-    args.push("--keep-open");
+  args.push(...valueArgs(definition.fields, body));
+  args.push(...flagArgs(definition.trailing, body));
+  return args;
+}
+
+export function buildReviewerJobArgs(mode, body) {
+  if (!["reviewers-prepare", "reviewers-invite"].includes(mode)) {
+    throw new Error(`Nieznany tryb reviewerów: ${mode}`);
+  }
+
+  const definition = modeDefinition(mode);
+  const args = [...definition.flags, `--reviewer-queue=${body.reviewerQueue}`];
+
+  // --invite-all jest jedynym potwierdzeniem realnej wysyłki zaproszeń.
+  if (definition.live) {
+    args.push("--invite-all");
+  }
+
+  args.push(...valueArgs(definition.fields, body));
+  args.push(...flagArgs(definition.trailing, body));
+  return args;
+}
+
+export function buildScreeningJobArgs(body, { applyDecisions = false } = {}) {
+  const definition = modeDefinition("screening");
+  const args = [...definition.flags];
+
+  if (applyDecisions) {
+    args.push("--apply-assessment-decisions");
+  }
+  if (body.screeningScanAll) {
+    args.push("--scan-all-metadata");
+  }
+
+  args.push(...valueArgs(definition.fields, body));
+  // Wiadomość odrzucenia i approve bez dobrania edytorów mają sens wyłącznie w
+  // przebiegu, który realnie wykonuje decyzje.
+  if (applyDecisions) {
+    args.push(...valueArgs(["screeningRejectMessage"], body));
+    args.push(...flagArgs(["screeningApproveWithoutAssign"], body));
+  }
+  args.push(...flagArgs(definition.trailing, body));
+  return args;
+}
+
+function valueArgs(keys, body) {
+  const args = [];
+  for (const key of keys || []) {
+    const value = body[key];
+    if (value === undefined || value === null || value === "") continue;
+    args.push(`--${field(key).flag}=${value}`);
   }
   return args;
 }
 
-function optionArgs(body, mapping) {
-  const args = [];
-  for (const [flag, key] of Object.entries(mapping)) {
-    const value = body[key];
-    if (value === undefined || value === null || value === "") {
-      continue;
-    }
-    args.push(`--${flag}=${value}`);
-  }
-  return args;
+function flagArgs(keys, body) {
+  return (keys || [])
+    .filter((key) => Boolean(body[key]))
+    .map((key) => `--${field(key).flag}`);
 }

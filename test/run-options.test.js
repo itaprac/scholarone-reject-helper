@@ -54,6 +54,84 @@ test("rejects partial integers and invalid start URLs", () => {
   );
 });
 
+test("validates reviewer preparation and invitation batches", () => {
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewerQueue: "select",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "1",
+    reviewerSlowMo: "0",
+  }, "reviewers-prepare"));
+
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerStartUrl: "https://mc.manuscriptcentral.com/kes",
+    reviewerQueue: "invite",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "5",
+    reviewerSlowMo: "500",
+  }, "reviewers-invite"));
+
+  assert.doesNotThrow(() => validateRunOptions({
+    reviewerQueue: "combined",
+    reviewersPerPaper: "10",
+    reviewerMaxManuscripts: "3",
+    reviewerSlowMo: "500",
+    reviewerRefreshWaitSeconds: "60",
+  }, "reviewers-invite"));
+});
+
+test("reviewer refresh wait must be at least one second", () => {
+  assertBadRequest(() => validateRunOptions({
+    reviewerQueue: "combined",
+    reviewerRefreshWaitSeconds: "0",
+  }, "reviewers-invite"), /reviewerRefreshWaitSeconds/);
+});
+
+test("safe reviewer preparation cannot silently become a batch", () => {
+  assertBadRequest(() => validateRunOptions({
+    reviewerQueue: "select",
+    reviewerMaxManuscripts: "2",
+  }, "reviewers-prepare"), /jeden manuskrypt/);
+});
+
+test("validates Codex-backed initial assessment options", () => {
+  assert.doesNotThrow(() => validateRunOptions({
+    screeningStartUrl: "https://mc.manuscriptcentral.com/kes",
+    screeningMaxChecked: "10",
+    screeningSlowMo: "0",
+    assessmentTimeoutSeconds: "120",
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"));
+
+  assertBadRequest(() => validateRunOptions({
+    screeningMaxChecked: "0",
+  }, "screening"), /screeningMaxChecked/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentTimeoutSeconds: "5",
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"), /assessmentTimeoutSeconds/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "  ",
+  }, "screening"), /Prompt oceny LLM/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "extreme",
+    assessmentPrompt: "Temporary test prompt",
+  }, "screening"), /assessmentReasoningEffort/);
+
+  assertBadRequest(() => validateRunOptions({
+    assessmentReasoningEffort: "medium",
+    assessmentPrompt: "Temporary test prompt",
+    screeningLive: true,
+    screeningRejectMessage: "  ",
+  }, "screening"), /Wiadomość Reject/);
+});
+
 function assertBadRequest(callback, messagePattern) {
   assert.throws(callback, (error) => {
     assert.equal(error.statusCode, 400);

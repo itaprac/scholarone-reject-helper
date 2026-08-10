@@ -3,16 +3,44 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "bin": {
+    "scholarone": "bin/scholarone.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "install-browsers": "playwright install chromium",
     "test": "node --test",
+    "lint": "eslint .",
+    "check": "npm run lint && node scripts/generate-cli-docs.js --check && npm test",
+    "doctor": "node bin/scholarone.js doctor",
+    "logs:prune": "node scripts/prune-logs.js",
+    "fixtures:check": "node scripts/anonymize-fixtures.js --check",
     "ui": "node src/ui-server.js",
-    "dryrun": "node src/auto-reject.js --headed --dry-run",
-    "reject": "node src/auto-reject.js --headed --save-and-send",
-    "reject:from-report": "node src/auto-reject.js --headed --save-and-send --require-targets",
-    "codegen": "playwright codegen https://mc.manuscriptcentral.com/kes"
+    "reject:dry": "node bin/scholarone.js reject --dry-run",
+    "reject:send": "node bin/scholarone.js reject --send",
+    "screen:dry": "node bin/scholarone.js screen --dry-run",
+    "screen:live": "node bin/scholarone.js screen --live",
+    "reviewers:prepare": "node bin/scholarone.js reviewers --prepare",
+    "reviewers:invite": "node bin/scholarone.js reviewers --invite",
+    "dryrun": "node bin/scholarone.js reject --dry-run",
+    "reject": "node bin/scholarone.js reject --send",
+    "reject:from-report": "node bin/scholarone.js reject --send",
+    "screen-metadata": "node src/auto-reject.js --headed --collect-metadata",
+    "screen-manuscript": "node bin/scholarone.js screen --dry-run",
+    "screen-manuscript:live": "node bin/scholarone.js screen --live",
+    "select-reviewers": "node bin/scholarone.js reviewers --prepare",
+    "select-reviewers:invite": "node bin/scholarone.js reviewers --invite",
+    "select-reviewers:resume": "node bin/scholarone.js reviewers --prepare --resume-invite-reviewers",
+    "select-reviewers:resume:invite": "node bin/scholarone.js reviewers --invite --resume-invite-reviewers",
+    "codegen": "playwright codegen https://mc.manuscriptcentral.com/kes",
+    "docs:cli": "node scripts/generate-cli-docs.js"
   },
   "dependencies": {
     "playwright": "^1.55.0"
+  },
+  "devDependencies": {
+    "eslint": "^10.8.0"
   }
 }

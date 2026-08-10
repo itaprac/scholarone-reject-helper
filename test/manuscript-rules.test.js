@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   extractManuscriptId,
   inspectManuscriptText,
+  isRevisionManuscriptId,
   normalizeManuscriptId,
 } from "../src/manuscript-rules.js";
 
@@ -69,6 +70,14 @@ test("requires manual review when the manuscript ID cannot be read", () => {
 test("extracts and normalizes supported manuscript IDs", () => {
   assert.equal(extractManuscriptId("Document number: kes-26-123456.r10"), "KES-26-123456.R10");
   assert.equal(normalizeManuscriptId(" kes-26-1234.r2 "), "KES-26-1234.R2");
+});
+
+test("recognizes only manuscript IDs ending in .R followed by digits as revisions", () => {
+  assert.equal(isRevisionManuscriptId("KES-26-1234.R1"), true);
+  assert.equal(isRevisionManuscriptId(" kes-26-1234.r10 "), true);
+  assert.equal(isRevisionManuscriptId("KES-26-1234"), false);
+  assert.equal(isRevisionManuscriptId("KES-26-1234.R"), false);
+  assert.equal(isRevisionManuscriptId("KES-26-1234.R2.EXTRA"), false);
 });
 
 test.todo("parse numeric slash dates deterministically instead of relying on locale");
