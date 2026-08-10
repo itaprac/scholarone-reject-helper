@@ -74,6 +74,18 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, await readCliRun(tail));
     }
 
+    // Historia przebiegów: te same pliki JSONL, które zasilają monitor na
+    // żywo, dostępne również po zakończeniu przebiegu.
+    if (url.pathname === "/api/cli-run/history" && req.method === "GET") {
+      return sendJson(res, { runs: await listRunLogs() });
+    }
+
+    const runLogMatch = url.pathname.match(/^\/api\/cli-run\/history\/([^/]+)$/);
+    if (runLogMatch && req.method === "GET") {
+      const tail = clampInt(url.searchParams.get("tail"), 500, 1, 2000);
+      return sendJson(res, await readArchivedRun(decodeURIComponent(runLogMatch[1]), tail));
+    }
+
     if (url.pathname === "/api/doctor" && req.method === "GET") {
       return sendJson(res, { checks: await runDoctorChecks() });
     }
@@ -248,6 +260,141 @@ async function readCliRun(tail) {
     run: { ...run, alive, effectiveStatus },
     events: await readRunEvents(run.logFile, tail),
   };
+}
+
+// Lista zarchiwizowanych logów przebiegów. Metadane pochodzą z pierwszego
+// i ostatniego zdarzenia pliku; przebieg wskazywany przez current-run.json
+// jako żywy jest oznaczany "running", żeby nie wyglądał na przerwany.
+async function listRunLogs(limit = 40) {
+  const logsDir = path.join(projectRoot, "logs");
+  const names = await fsp.readdir(logsDir).catch(() => []);
+  const current = await readJsonFile(path.join(projectRoot, "logs", "current-run.json"));
+  const currentLogName = typeof current?.logFile === "string" ? path.basename(current.logFile) : null;
+  const currentRunning = current?.status === "running" && isProcessAlive(current.pid);
+
+  // Tylko logi przebiegów (nazwane znacznikiem czasu startu) — w logs/ leżą
+  // też inne pliki JSONL, np. dziennik akcji.
+  const runLogPattern = /^(select-reviewers-)?\d{4}-\d{2}-\d{2}T[\d-]+Z\.jsonl$/i;
+
+  const runs = [];
+  for (const filename of names.filter((name) => runLogPattern.test(name))) {
+    const absolutePath = path.join(logsDir, filename);
+    const stat = await fsp.stat(absolutePath).catch(() => null);
+    if (!stat) continue;
+    const lines = await readRunLogLines(absolutePath);
+    if (lines.length === 0) continue;
+    const meta = runLogMeta(filename, lines, stat.mtime);
+    if (filename === currentLogName && currentRunning) {
+      meta.status = "running";
+    }
+    runs.push(meta);
+  }
+
+  return runs
+    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
+    .slice(0, limit);
+}
+
+async function readArchivedRun(filename, tail) {
+  const logsDir = path.join(projectRoot, "logs");
+  const absolutePath = path.resolve(logsDir, path.basename(String(filename)));
+  const relative = path.relative(logsDir, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || !/\.jsonl$/i.test(absolutePath)) {
+    throw badRequest("Log przebiegu musi byc plikiem JSONL z logs/.");
+  }
+
+  const stat = await fsp.stat(absolutePath).catch(() => null);
+  if (!stat) {
+    throw badRequest("Nie znaleziono logu przebiegu.");
+  }
+
+  const lines = await readRunLogLines(absolutePath);
+  const events = lines
+    .slice(-tail)
+    .map(parseJsonLine)
+    .filter(Boolean)
+    .map(compactEvent);
+
+  const run = runLogMeta(path.basename(absolutePath), lines, stat.mtime);
+  if (run.mode === "reviewers") {
+    Object.assign(run, reviewerCounters(lines.map(parseJsonLine).filter(Boolean)));
+  }
+
+  return { run, events, totalEvents: lines.length };
+}
+
+// Odpowiednik liczników recenzentów z core/run-status.js, odtworzony z pełnego
+// logu — stare przebiegi nie mają pulsu, więc trzeba je policzyć ze zdarzeń.
+function reviewerCounters(events) {
+  const counters = { papersDone: 0, papersRequested: null, invited: 0 };
+  for (const event of events) {
+    if (
+      ["batch_manuscript_finished", "deferred_reviewer_finished"].includes(event.type) &&
+      event.status !== "reviewer_search_deferred"
+    ) {
+      counters.papersDone += 1;
+    }
+    if (Number.isFinite(event.completed)) {
+      counters.papersDone = Math.max(counters.papersDone, event.completed);
+    }
+    if (Number.isFinite(event.requested)) {
+      counters.papersRequested = event.requested;
+    }
+    if (event.type === "invite_all_verification" && Number.isFinite(event.invitedIncrease) && event.invitedIncrease > 0) {
+      counters.invited += event.invitedIncrease;
+    }
+  }
+  return counters;
+}
+
+async function readRunLogLines(absolutePath) {
+  try {
+    const content = await fsp.readFile(absolutePath, "utf8");
+    return content.split(/\r?\n/).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonLine(line) {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return null;
+  }
+}
+
+function runLogMeta(filename, lines, mtime) {
+  const first = parseJsonLine(lines[0]);
+  const last = parseJsonLine(lines[lines.length - 1]);
+  const final = last && ["run_finished", "run_failed"].includes(last.type) ? last : null;
+
+  return {
+    filename,
+    runId: filename.replace(/\.jsonl$/i, ""),
+    mode: runLogMode(filename, first),
+    status: final ? (final.type === "run_finished" ? "finished" : "failed") : "interrupted",
+    resultStatus: typeof final?.status === "string" ? final.status : null,
+    startedAt: first?.at || mtime.toISOString(),
+    finishedAt: final?.at || mtime.toISOString(),
+    checked: Number.isFinite(final?.checked) ? final.checked : null,
+    rejected: Number.isFinite(final?.rejected) ? final.rejected : null,
+    eventCount: lines.length,
+  };
+}
+
+// Odpowiednik describeMode z run-reject.js, odtworzony z zapisu run_started —
+// stare logi nie mają pola mode, więc trzeba go wywnioskować z flag.
+function runLogMode(filename, first) {
+  if (/^select-reviewers-/i.test(filename)) return "reviewers";
+  if (!first || first.type !== "run_started") return null;
+  if (first.collectMetadata) {
+    return first.applyAssessmentDecisions ? "screening-live" : "screening-dryrun";
+  }
+  if (first.rejectFromReport || first.rejectIdsCount) return "reject-from-report";
+  if (first.reportOnly) return "reject-dryrun";
+  if (first.saveAndSend) return "live-reject";
+  return "scan";
 }
 
 function isProcessAlive(pid) {

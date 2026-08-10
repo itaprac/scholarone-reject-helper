@@ -22,6 +22,10 @@ const monitorState = {
   offlineMessage: "",
   renderedRunId: null,
   renderedEventCount: -1,
+  // "live" śledzi current-run.json; nazwa pliku JSONL pokazuje stary przebieg.
+  view: "live",
+  archive: null,
+  lastLiveStatus: null,
 };
 
 const REPORT_COLUMN_COUNT = 5;
@@ -55,8 +59,12 @@ const els = {
   factPid: document.getElementById("factPid"),
   factStarted: document.getElementById("factStarted"),
   factHeartbeat: document.getElementById("factHeartbeat"),
+  factHeartbeatLabel: document.getElementById("factHeartbeatLabel"),
+  monitorRunSelect: document.getElementById("monitorRunSelect"),
   tileChecked: document.getElementById("tileChecked"),
+  tileCheckedLabel: document.getElementById("tileCheckedLabel"),
   tileRejected: document.getElementById("tileRejected"),
+  tileRejectedLabel: document.getElementById("tileRejectedLabel"),
   tileResult: document.getElementById("tileResult"),
   tileRunId: document.getElementById("tileRunId"),
   monitorLogInfo: document.getElementById("monitorLogInfo"),
@@ -156,6 +164,7 @@ bindAsyncClick(els.screeningDryRunBtn, runMetadataCollection);
 bindAsyncClick(els.screeningLiveRunBtn, runLiveAssessment);
 bindAsyncClick(els.saveScreeningSettingsBtn, saveScreeningSettings);
 
+els.monitorRunSelect.addEventListener("change", () => selectMonitorRun().catch(showError));
 els.screeningRunSelect?.addEventListener("change", () => loadScreeningRun().catch(showError));
 els.screeningDecisionFilter?.addEventListener("change", renderScreeningResults);
 if (els.refreshScreeningRunsBtn) bindAsyncClick(els.refreshScreeningRunsBtn, refreshScreeningRuns);
@@ -881,6 +890,9 @@ function activateView(view) {
     item.tab.setAttribute("aria-selected", String(active));
     item.tab.tabIndex = active ? 0 : -1;
   }
+  if (view === "monitor") {
+    refreshMonitorHistory().catch(() => undefined);
+  }
 }
 
 function showError(error) {
@@ -1079,6 +1091,7 @@ function confirmDangerousAction(message) {
 
 function startRunMonitor() {
   pollRunMonitor();
+  refreshMonitorHistory().catch(() => undefined);
   setInterval(pollRunMonitor, MONITOR_POLL_MS);
   setInterval(renderMonitorClocks, MONITOR_TICK_MS);
 }
@@ -1094,16 +1107,118 @@ async function pollRunMonitor() {
     monitorState.offline = true;
     monitorState.offlineMessage = error.message;
   }
+
+  // Świeżo zakończony przebieg od razu pojawia się na liście historii.
+  const liveStatus = monitorState.run?.effectiveStatus || null;
+  if (liveStatus !== monitorState.lastLiveStatus) {
+    monitorState.lastLiveStatus = liveStatus;
+    if (["finished", "failed", "dead"].includes(liveStatus)) {
+      refreshMonitorHistory().catch(() => undefined);
+    }
+  }
+
+  renderMonitor();
+}
+
+async function refreshMonitorHistory() {
+  const { runs } = await api("/api/cli-run/history");
+  const select = els.monitorRunSelect;
+  const previous = select.value || "live";
+  select.replaceChildren();
+
+  const live = document.createElement("option");
+  live.value = "live";
+  live.textContent = "Live: follow current run";
+  select.append(live);
+
+  for (const run of runs) {
+    if (run.status === "running") continue;
+    const option = document.createElement("option");
+    option.value = run.filename;
+    option.textContent = monitorHistoryLabel(run);
+    select.append(option);
+  }
+
+  const stillExists = Array.from(select.options).some((option) => option.value === previous);
+  select.value = stillExists ? previous : "live";
+  if (!stillExists) {
+    monitorState.view = "live";
+    monitorState.archive = null;
+    renderMonitor();
+  }
+}
+
+function monitorHistoryLabel(run) {
+  const parts = [formatReportDate(run.startedAt)];
+  if (run.mode) parts.push(run.mode);
+  parts.push(
+    run.status === "finished" && run.resultStatus
+      ? run.resultStatus.replaceAll("_", " ")
+      : run.status
+  );
+  return parts.join(" · ");
+}
+
+async function selectMonitorRun() {
+  const value = els.monitorRunSelect.value;
+  if (value === "live") {
+    monitorState.view = "live";
+    monitorState.archive = null;
+    renderMonitor();
+    return;
+  }
+
+  const payload = await api(`/api/cli-run/history/${encodeURIComponent(value)}?tail=2000`);
+  monitorState.view = "archive";
+  monitorState.archive = payload;
   renderMonitor();
 }
 
 function renderMonitor() {
+  if (monitorState.view === "archive" && monitorState.archive) {
+    renderArchivedMonitor();
+    return;
+  }
   renderBeacon();
   renderMonitorTiles();
   renderMonitorLog();
 }
 
+function renderArchivedMonitor() {
+  const { run, events, totalEvents } = monitorState.archive;
+  const dotState = run.status === "finished" ? "finished" : "bad";
+  const statusLabel =
+    run.status === "finished" ? "Finished" : run.status === "failed" ? "Failed" : "Interrupted";
+
+  setBeacon(
+    dotState,
+    statusLabel,
+    `Saved run from ${formatReportDate(run.startedAt)}. Select "Live" to follow the current run again.`
+  );
+  els.factHeartbeatLabel.textContent = "Finished";
+  setMonitorFacts({
+    mode: run.mode,
+    pid: null,
+    started: formatReportDate(run.startedAt),
+    heartbeat: run.finishedAt ? formatReportDate(run.finishedAt) : null,
+  });
+
+  renderCountTiles(run);
+  setMonitorText(
+    els.tileResult,
+    run.resultStatus ? run.resultStatus.replaceAll("_", " ") : statusLabel.toLowerCase()
+  );
+  setMonitorText(els.tileRunId, run.runId);
+
+  const truncated = totalEvents > events.length ? `last ${events.length} of ${totalEvents}` : `all ${events.length}`;
+  renderMonitorEvents(events, `archive:${run.filename}`, `${truncated} events from ${run.filename}`, {
+    emptyText: "This log has no readable events.",
+    stickToBottom: false,
+  });
+}
+
 function renderBeacon() {
+  els.factHeartbeatLabel.textContent = "Heartbeat";
   if (monitorState.offline) {
     setBeacon("offline", "Offline", `UI server unreachable: ${monitorState.offlineMessage}`);
     return;
@@ -1156,10 +1271,28 @@ function setMonitorFacts(facts) {
 
 function renderMonitorTiles() {
   const run = monitorState.offline ? null : monitorState.run;
-  setMonitorText(els.tileChecked, run ? run.checked : null);
-  setMonitorText(els.tileRejected, run ? run.rejected : null);
+  renderCountTiles(run);
   setMonitorText(els.tileResult, run?.resultStatus ? run.resultStatus.replaceAll("_", " ") : null);
   setMonitorText(els.tileRunId, run ? run.runId : null);
+}
+
+// Przebieg recenzentów nie odrzuca artykułów, więc pierwsze dwa kafelki
+// pokazują jego właściwy postęp: obrobione artykuły i wysłane zaproszenia.
+function renderCountTiles(run) {
+  if (run?.mode === "reviewers") {
+    els.tileCheckedLabel.textContent = "Papers";
+    els.tileRejectedLabel.textContent = "Invited";
+    const done = Number.isFinite(run.papersDone) ? run.papersDone : null;
+    const requested = Number.isFinite(run.papersRequested) ? run.papersRequested : null;
+    setMonitorText(els.tileChecked, done === null ? null : requested ? `${done} / ${requested}` : done);
+    setMonitorText(els.tileRejected, run.invited);
+    return;
+  }
+
+  els.tileCheckedLabel.textContent = "Checked";
+  els.tileRejectedLabel.textContent = "Rejected";
+  setMonitorText(els.tileChecked, run ? run.checked : null);
+  setMonitorText(els.tileRejected, run ? run.rejected : null);
 }
 
 function renderMonitorLog() {
@@ -1169,39 +1302,54 @@ function renderMonitorLog() {
   }
 
   const runId = monitorState.run?.runId || null;
-  els.monitorLogInfo.textContent = monitorState.run?.logFile
+  const info = monitorState.run?.logFile
     ? `tail of ${monitorState.run.logFile}`
     : "tail of the run log";
+  renderMonitorEvents(monitorState.events, `live:${runId}`, info, {
+    emptyText: monitorState.run ? "No events yet." : "No run data yet.",
+    stickToBottom: true,
+  });
+}
+
+// Wspólny renderer dla widoku live i archiwum. renderKey rozróżnia źródła,
+// więc przełączenie przebiegu zawsze przebudowuje listę, a kolejne odpytania
+// tego samego przebiegu nie ruszają DOM bez zmian.
+function renderMonitorEvents(events, renderKey, infoText, { emptyText, stickToBottom }) {
+  els.monitorLogInfo.textContent = infoText;
 
   const unchanged =
-    runId === monitorState.renderedRunId &&
-    monitorState.events.length === monitorState.renderedEventCount;
+    renderKey === monitorState.renderedRunId &&
+    events.length === monitorState.renderedEventCount;
   if (unchanged) {
     return;
   }
 
-  const firstRender = monitorState.renderedEventCount === -1;
+  const firstRender =
+    monitorState.renderedEventCount === -1 || renderKey !== monitorState.renderedRunId;
   const wasAtBottom =
     els.monitorLog.scrollTop + els.monitorLog.clientHeight >= els.monitorLog.scrollHeight - 8;
-  monitorState.renderedRunId = runId;
-  monitorState.renderedEventCount = monitorState.events.length;
+  monitorState.renderedRunId = renderKey;
+  monitorState.renderedEventCount = events.length;
 
   els.monitorLog.replaceChildren();
 
-  if (monitorState.events.length === 0) {
+  if (events.length === 0) {
     const empty = document.createElement("p");
     empty.className = "log-empty";
-    empty.textContent = monitorState.run ? "No events yet." : "No run data yet.";
+    empty.textContent = emptyText;
     els.monitorLog.append(empty);
     return;
   }
 
-  for (const event of monitorState.events) {
+  for (const event of events) {
     els.monitorLog.append(monitorLogRow(event));
   }
 
-  if (firstRender || wasAtBottom) {
+  if (stickToBottom && (firstRender || wasAtBottom)) {
     els.monitorLog.scrollTop = els.monitorLog.scrollHeight;
+  } else if (firstRender) {
+    // Archiwum czyta się od początku przebiegu.
+    els.monitorLog.scrollTop = 0;
   }
 }
 
@@ -1264,7 +1412,7 @@ function monitorEventDetails(event) {
 }
 
 function renderMonitorClocks() {
-  if (monitorState.offline || !monitorState.run) {
+  if (monitorState.view !== "live" || monitorState.offline || !monitorState.run) {
     return;
   }
   setMonitorText(els.factStarted, relativeTime(monitorState.run.startedAt));

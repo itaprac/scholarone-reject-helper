@@ -19,6 +19,10 @@ export function createRunStatus({ logsDir, runId, pid, mode, logFile }) {
     finishedAt: null,
     checked: 0,
     rejected: 0,
+    // Liczniki przebiegu recenzentów: obrobione artykuły i wysłane zaproszenia.
+    papersDone: 0,
+    papersRequested: null,
+    invited: 0,
     lastEvent: null,
     logFile,
   };
@@ -54,6 +58,24 @@ export function createRunStatus({ logsDir, runId, pid, mode, logFile }) {
       }
       if (Number.isFinite(payload.rejected)) {
         status.rejected = Math.max(status.rejected, payload.rejected);
+      }
+
+      // Przebieg recenzentów nie ma checked/rejected; jego postęp to artykuły
+      // zamknięte w pętli batcha i faktycznie potwierdzone zaproszenia.
+      if (
+        ["batch_manuscript_finished", "deferred_reviewer_finished"].includes(type) &&
+        payload.status !== "reviewer_search_deferred"
+      ) {
+        status.papersDone += 1;
+      }
+      if (Number.isFinite(payload.completed)) {
+        status.papersDone = Math.max(status.papersDone, payload.completed);
+      }
+      if (Number.isFinite(payload.requested)) {
+        status.papersRequested = payload.requested;
+      }
+      if (type === "invite_all_verification" && Number.isFinite(payload.invitedIncrease) && payload.invitedIncrease > 0) {
+        status.invited += payload.invitedIncrease;
       }
 
       if (type === "run_finished") {

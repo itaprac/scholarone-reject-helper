@@ -90,6 +90,10 @@ tr.report-row {
   padding: 7px 14px;
 }
 
+.mode-tab:hover:not(.selected) {
+  color: var(--text);
+}
+
 .mode-tab.selected {
   border-color: var(--line);
   border-bottom-color: var(--bg);
@@ -143,6 +147,12 @@ h2 {
 main {
   width: min(1180px, calc(100% - 32px));
   margin: 0 auto;
+  padding-bottom: 40px;
+}
+
+/* Ostatnia sekcja strony nie potrzebuje własnej linii zamykającej. */
+.job-section {
+  border-bottom: 0;
 }
 
 .band {
@@ -480,6 +490,7 @@ tr.report-row.selected .report-name {
   background: var(--soft);
   padding: 2px 7px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .report-action-bar,
@@ -710,6 +721,13 @@ tr.report-row.selected .report-name {
 
 /* --- Run monitor (zakładka Monitor) --- */
 
+/* Wybór przebiegu: "Live" śledzi bieżący, pozycje z historii pokazują
+   zapisany log. Stała szerokość, żeby nagłówek nie skakał po wyborze. */
+.monitor-run-picker {
+  flex: none;
+  width: min(340px, 100%);
+}
+
 .beacon {
   display: flex;
   flex-wrap: wrap;
@@ -818,6 +836,7 @@ tr.report-row.selected .report-name {
   margin: 3px 0 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
 
 .monitor-tiles {
@@ -850,6 +869,7 @@ tr.report-row.selected .report-name {
   font-size: 26px;
   font-weight: 700;
   line-height: 1.15;
+  font-variant-numeric: tabular-nums;
 }
 
 .tile-value-small {
@@ -905,6 +925,7 @@ tr.report-row.selected .report-name {
 .log-time {
   flex: none;
   color: oklch(62% 0.025 250);
+  font-variant-numeric: tabular-nums;
 }
 
 .log-type {

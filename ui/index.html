@@ -353,8 +353,14 @@
             <div>
               <p class="eyebrow">Diagnostics</p>
               <h2>Run monitor</h2>
-              <p class="section-copy">Live status of the automation script, including runs started from the CLI or by an agent. Updates every few seconds.</p>
+              <p class="section-copy">Live status of the automation script, including runs started from the CLI or by an agent. Pick a past run to review its full event log.</p>
             </div>
+            <label class="monitor-run-picker">
+              Run
+              <select id="monitorRunSelect">
+                <option value="live" selected>Live: follow current run</option>
+              </select>
+            </label>
           </div>
 
           <div class="beacon">
@@ -369,17 +375,17 @@
               <div><dt>Mode</dt><dd id="factMode">—</dd></div>
               <div><dt>PID</dt><dd id="factPid">—</dd></div>
               <div><dt>Started</dt><dd id="factStarted">—</dd></div>
-              <div><dt>Heartbeat</dt><dd id="factHeartbeat">—</dd></div>
+              <div><dt id="factHeartbeatLabel">Heartbeat</dt><dd id="factHeartbeat">—</dd></div>
             </dl>
           </div>
 
           <div class="monitor-tiles">
             <div class="monitor-tile">
-              <span class="tile-label">Checked</span>
+              <span id="tileCheckedLabel" class="tile-label">Checked</span>
               <strong id="tileChecked" class="tile-value">—</strong>
             </div>
             <div class="monitor-tile">
-              <span class="tile-label">Rejected</span>
+              <span id="tileRejectedLabel" class="tile-label">Rejected</span>
               <strong id="tileRejected" class="tile-value">—</strong>
             </div>
             <div class="monitor-tile">
