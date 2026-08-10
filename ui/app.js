@@ -75,6 +75,7 @@ const els = {
   assessmentTimeoutSeconds: document.getElementById("assessmentTimeoutSeconds"),
   assessmentPrompt: document.getElementById("assessmentPrompt"),
   screeningRejectMessage: document.getElementById("screeningRejectMessage"),
+  screeningApproveWithoutAssign: document.getElementById("screeningApproveWithoutAssign"),
   screeningDryRunBtn: document.getElementById("screeningDryRunBtn"),
   screeningLiveRunBtn: document.getElementById("screeningLiveRunBtn"),
   saveScreeningSettingsBtn: document.getElementById("saveScreeningSettingsBtn"),
@@ -187,16 +188,23 @@ async function executeSelectedRun() {
 
   const approve = pending.filter((row) => row.decision === "APPROVE").length;
   const reject = pending.filter((row) => row.decision === "REJECT").length;
+  const approveWithoutAssign = els.screeningApproveWithoutAssign.checked;
+  const approveNote = approveWithoutAssign
+    ? "approved papers will be left in Awaiting EIC Assignment for manual editor assignment"
+    : "approved papers will be assigned to the configured editor";
 
   if (!confirmDangerousAction(
-    `Execute ${pending.length} decisions from this run?\n\nAPPROVE: ${approve}\nREJECT: ${reject}\n\nRejection emails will be sent and approved papers will be assigned to the configured editor.`
+    `Execute ${pending.length} decisions from this run?\n\nAPPROVE: ${approve}\nREJECT: ${reject}\n\nRejection emails will be sent and ${approveNote}.`
   )) {
     return;
   }
 
   const payload = await api("/api/run/screening/execute", {
     method: "POST",
-    body: JSON.stringify({ run: filename }),
+    body: JSON.stringify({
+      run: filename,
+      screeningApproveWithoutAssign: approveWithoutAssign,
+    }),
   });
   setJob(payload.job);
 }
@@ -477,8 +485,11 @@ async function runLiveAssessment() {
   const scope = els.screeningScope.value === "all"
     ? "the entire Complete Checklist queue"
     : `at most ${valueOf(els.screeningMaxChecked)} manuscripts`;
+  const approveNote = els.screeningApproveWithoutAssign.checked
+    ? "approved papers will be left in Awaiting EIC Assignment for manual editor assignment (revisions are still fully assigned)"
+    : "approved papers will be assigned to the configured editor as EIC and AE";
   if (!confirmDangerousAction(
-    `Run LIVE over ${scope}?\n\nAPPROVE and REJECT will really be performed in ScholarOne. Rejection emails will be sent and approved papers will be assigned to the configured editor as EIC and AE.`
+    `Run LIVE over ${scope}?\n\nAPPROVE and REJECT will really be performed in ScholarOne. Rejection emails will be sent and ${approveNote}.`
   )) {
     return;
   }
@@ -895,6 +906,7 @@ function applyConfig(config) {
   setValue(els.assessmentTimeoutSeconds, config.assessmentTimeoutSeconds);
   setValue(els.assessmentPrompt, config.assessmentPrompt);
   setValue(els.screeningRejectMessage, config.screeningRejectMessage);
+  els.screeningApproveWithoutAssign.checked = Boolean(config.screeningApproveWithoutAssign);
   renderScreeningScope();
   renderReviewerBatchSummary();
   const settingsStatus = config.settingsSaved
@@ -960,6 +972,7 @@ function screeningOptions() {
     assessmentTimeoutSeconds: valueOf(els.assessmentTimeoutSeconds),
     assessmentPrompt: valueOf(els.assessmentPrompt),
     screeningRejectMessage: valueOf(els.screeningRejectMessage),
+    screeningApproveWithoutAssign: els.screeningApproveWithoutAssign.checked,
   };
 }
 

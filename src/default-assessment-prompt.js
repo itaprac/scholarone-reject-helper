@@ -73,8 +73,8 @@ The probabilities must sum to 100%. Use the score as guidance, not as an automat
 
 After estimating the probabilities, apply this fixed rule mechanically:
 
-- if Probability of REJECT is greater than 40%, return decision REJECT;
-- if Probability of REJECT is 40% or less, return decision APPROVE, meaning SENT FOR REVIEW.
+- if Probability of REJECT is greater than 65%, return decision REJECT;
+- if Probability of REJECT is 65% or less, return decision APPROVE, meaning SENT FOR REVIEW.
 
 In reason use exactly this compact format, followed by one short justification:
 ENGLISH: X/100; SCIENTIFIC: Y/100; FINAL: Z/100; REJECT_PROBABILITY: R%; REVIEW_PROBABILITY: S%. Justification: ...`;

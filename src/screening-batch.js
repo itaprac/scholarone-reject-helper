@@ -18,6 +18,9 @@ export function buildScreeningBatchResult({
   const liveRejected = manuscripts.filter(
     (entry) => entry.decisionAction?.completed && entry.decisionAction?.decision === "REJECT"
   ).length;
+  const liveApprovedAwaitingAssignment = manuscripts.filter(
+    (entry) => entry.decisionAction?.completed && entry.decisionAction?.awaitingEditorAssignment
+  ).length;
   const automaticallyApprovedRevisions = manuscripts.filter(
     (entry) => entry.assessment?.mode === "automatic-revision" && entry.assessment?.decision === "APPROVE"
   ).length;
@@ -81,6 +84,7 @@ export function buildScreeningBatchResult({
       assessmentErrors,
       liveApproved,
       liveRejected,
+      liveApprovedAwaitingAssignment,
       actionErrors,
       totalAssessmentDurationMs,
       tokenUsage,
@@ -88,7 +92,11 @@ export function buildScreeningBatchResult({
     queueExhausted,
     limitReached,
     note: applyAssessmentDecisions
-      ? `${scopeNote} Zastosowano decyzje w ScholarOne: APPROVE ${liveApproved}, REJECT ${liveRejected}.`
+      ? `${scopeNote} Zastosowano decyzje w ScholarOne: APPROVE ${liveApproved}, REJECT ${liveRejected}.${
+        liveApprovedAwaitingAssignment > 0
+          ? ` ${liveApprovedAwaitingAssignment} zatwierdzonych czeka w Awaiting EIC Assignment na ręczne dobranie edytorów.`
+          : ""
+      }`
       : assessWithLlm
       ? `${scopeNote} Oceny LLM są wstępne i informacyjne; nie kliknięto Complete Checklist ani żadnej decyzji.`
       : `${scopeNote} Nie kliknięto Complete Checklist ani żadnej decyzji.`,

@@ -130,12 +130,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/run/screening/execute" && req.method === "POST") {
       const body = await readJsonBody(req);
       const runPath = resolveScreeningRunPath(body.run);
-      return sendJson(res, {
-        job: startJob("initial-assessment-from-run", [
-          "--headed",
-          `--from-run=${relativeProjectPath(runPath)}`,
-        ]),
-      });
+      const args = ["--headed", `--from-run=${relativeProjectPath(runPath)}`];
+      if (body.screeningApproveWithoutAssign) {
+        args.push("--approve-without-assign");
+      }
+      return sendJson(res, { job: startJob("initial-assessment-from-run", args) });
     }
 
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);

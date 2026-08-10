@@ -184,3 +184,25 @@ test("builds an explicitly live initial assessment run", () => {
     "--screening-reject-message=Reject body",
   ]);
 });
+
+test("a live assessment run can leave approvals awaiting editor assignment", () => {
+  const body = {
+    screeningStartUrl: "https://mc.manuscriptcentral.com/kes",
+    screeningMaxChecked: "2",
+    screeningSlowMo: "500",
+    screeningScanAll: false,
+    screeningKeepOpen: false,
+    assessmentModel: "gpt-5.6-terra",
+    assessmentReasoningEffort: "medium",
+    assessmentTimeoutSeconds: "120",
+    assessmentPrompt: "Prompt",
+    screeningRejectMessage: "Reject body",
+    screeningApproveWithoutAssign: true,
+  };
+
+  assert.ok(buildScreeningJobArgs(body, { applyDecisions: true })
+    .includes("--approve-without-assign"));
+
+  // Dry run nie wykonuje decyzji, więc flaga nie ma prawa do niego trafić.
+  assert.ok(!buildScreeningJobArgs(body).includes("--approve-without-assign"));
+});

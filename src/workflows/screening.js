@@ -321,7 +321,7 @@ export async function runMetadataCollection(page) {
           runId: context.runId,
           mode: "screening-live",
           manuscriptId: summary.manuscriptId,
-          action: assessment.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+          action: screeningActionName(assessment),
           outcome: "sent",
           confirmed: true,
           detail: assessment.reason,
@@ -351,7 +351,7 @@ export async function runMetadataCollection(page) {
           runId: context.runId,
           mode: "screening-live",
           manuscriptId: summary.manuscriptId,
-          action: assessment.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+          action: screeningActionName(assessment),
           outcome: "failed",
           confirmed: false,
           detail: error.message,
@@ -487,17 +487,34 @@ export function logAssessmentBranch(continuation) {
   console.log(`[WORKFLOW BRANCH] ${continuation.action} (${suffix})`);
 }
 
+// Nazwa akcji do action-logu: approve bez dobrania edytorów to inna operacja
+// niż pełne approve-and-assign i log ma je rozróżniać. Rewizje zawsze dostają
+// pełny przebieg, więc opcja approveWithoutAssign ich nie dotyczy.
+export function screeningActionName(assessment) {
+  if (assessment.decision === "REJECT") return "reject-email";
+  return context.config.approveWithoutAssign && assessment.mode !== "automatic-revision"
+    ? "approve-awaiting-assignment"
+    : "approve-and-assign";
+}
+
 export async function applyLiveAssessmentDecision(page, assessment) {
   const checklistResult = await clickCompleteChecklist(page);
 
   if (assessment.decision === "APPROVE") {
+    const skipEditorAssignment =
+      context.config.approveWithoutAssign && assessment.mode !== "automatic-revision";
     const approvalResult = await approveAndAssignEditors(page, {
       editorName: context.config.screeningEditorName,
       allowExistingAssignments: assessment.mode === "automatic-revision",
+      skipEditorAssignment,
     });
+    if (approvalResult.awaitingEditorAssignment) {
+      console.log("[APPROVE ONLY] Artykuł czeka w Awaiting EIC Assignment na ręczne dobranie edytorów.");
+    }
     return {
       completed: true,
       decision: "APPROVE",
+      awaitingEditorAssignment: Boolean(approvalResult.awaitingEditorAssignment),
       checklistResult,
       approvalResult,
     };

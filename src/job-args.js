@@ -49,9 +49,11 @@ export function buildScreeningJobArgs(body, { applyDecisions = false } = {}) {
   }
 
   args.push(...valueArgs(definition.fields, body));
-  // Wiadomość odrzucenia ma sens wyłącznie w przebiegu, który realnie odrzuca.
+  // Wiadomość odrzucenia i approve bez dobrania edytorów mają sens wyłącznie w
+  // przebiegu, który realnie wykonuje decyzje.
   if (applyDecisions) {
     args.push(...valueArgs(["screeningRejectMessage"], body));
+    args.push(...flagArgs(["screeningApproveWithoutAssign"], body));
   }
   args.push(...flagArgs(definition.trailing, body));
   return args;

@@ -51,6 +51,7 @@ export async function writeMetadataArtifact(result, { config, runId }) {
       assessmentTimeoutSeconds: config.assessmentTimeoutSeconds,
       assessmentPromptLength: config.assessmentPrompt.length,
       applyAssessmentDecisions: config.applyAssessmentDecisions,
+      approveWithoutAssign: config.approveWithoutAssign,
       screeningEditorName: config.screeningEditorName,
       screeningRejectMessageLength: config.screeningRejectMessage.length,
     },

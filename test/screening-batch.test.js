@@ -64,6 +64,7 @@ test("keeps every eligible manuscript and assessment in one batch result", () =>
     assessmentErrors: 0,
     liveApproved: 0,
     liveRejected: 0,
+    liveApprovedAwaitingAssignment: 0,
     actionErrors: 0,
     totalAssessmentDurationMs: 3000,
     tokenUsage: {
@@ -148,6 +149,33 @@ test("reports completed live decisions and action failures separately", () => {
   assert.equal(result.status, "assessment_batch_completed_with_errors");
   assert.equal(result.summary.liveApproved, 1);
   assert.equal(result.summary.liveRejected, 1);
+  assert.equal(result.summary.liveApprovedAwaitingAssignment, 0);
   assert.equal(result.summary.actionErrors, 1);
   assert.match(result.note, /APPROVE 1, REJECT 1/);
+});
+
+test("counts approvals left awaiting manual editor assignment", () => {
+  const result = buildScreeningBatchResult({
+    checked: 2,
+    skippedUnusualActivity: [],
+    manuscripts: [
+      {
+        assessment: { decision: "APPROVE" },
+        decisionAction: { completed: true, decision: "APPROVE", awaitingEditorAssignment: true },
+      },
+      {
+        assessment: { decision: "APPROVE", mode: "automatic-revision" },
+        decisionAction: { completed: true, decision: "APPROVE" },
+      },
+    ],
+    assessWithLlm: true,
+    applyAssessmentDecisions: true,
+    scanAll: true,
+    maxChecked: 10,
+    queueExhausted: true,
+  });
+
+  assert.equal(result.summary.liveApproved, 2);
+  assert.equal(result.summary.liveApprovedAwaitingAssignment, 1);
+  assert.match(result.note, /1 zatwierdzonych czeka w Awaiting EIC Assignment/);
 });

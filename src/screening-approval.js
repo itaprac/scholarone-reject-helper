@@ -200,6 +200,7 @@ export async function approveAndAssignEditors(page, {
   editorName = DEFAULT_EDITOR_NAME,
   timeout = 20_000,
   allowExistingAssignments = false,
+  skipEditorAssignment = false,
 } = {}) {
   const checklist = await checkApprovalChecklist(page);
   const approval = await submitChecklistApproval(page, {
@@ -207,6 +208,26 @@ export async function approveAndAssignEditors(page, {
     allowExistingAssignments,
     editorName,
   });
+
+  // Strona „Editor-in-Chief List" potwierdza, że Approve przeszedł — manuskrypt
+  // jest już w Awaiting EIC Assignment. Dobieranie zostaje dla człowieka, który
+  // najpierw przejrzy PDF.
+  if (skipEditorAssignment && !approval.existingAssignments) {
+    return {
+      completed: true,
+      awaitingEditorAssignment: true,
+      checklist,
+      approval,
+      editorInChief: {
+        assigned: false,
+        source: "left-for-manual-assignment",
+      },
+      associateEditor: {
+        assigned: false,
+        source: "left-for-manual-assignment",
+      },
+    };
+  }
 
   if (approval.existingAssignments) {
     const assignmentVerification = await verifyFinalAssignments(page, editorName);

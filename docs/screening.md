@@ -59,6 +59,24 @@ Dla `REJECT` wysyła wiadomość z `--screening-reject-message`, dla `APPROVE`
 zaznacza oba pola Admin Checklist, zatwierdza pracę i przypisuje edytora
 kolejno jako Editor-in-Chief oraz Associate Editor.
 
+### Approve bez dobierania edytorów
+
+```bash
+node bin/scholarone.js screen --live --approve-without-assign
+node bin/scholarone.js screen --from-run=logs/screening/RUN_ID.json --approve-without-assign
+```
+
+Z flagą `--approve-without-assign` (w panelu: „Approve without assigning
+editors") `APPROVE` kończy się na kliknięciu **Approve** — artykuł zostaje w
+kolejce `Awaiting EIC Assignment`, a edytorów dobiera człowiek po przejrzeniu
+PDF-a. W ten sposób LLM robi pierwszą ocenę, a ostateczne potwierdzenie
+(dobranie EIC i AE) należy do redaktora.
+
+- `REJECT` działa bez zmian — wiadomość odrzucająca jest wysyłana.
+- Rewizje (`.R` + liczba) nadal przechodzą pełną ścieżkę z dobraniem edytorów.
+- W action-logu taka akcja ma nazwę `approve-awaiting-assignment`, a
+  podsumowanie przebiegu raportuje licznik `liveApprovedAwaitingAssignment`.
+
 Tryb live zatrzymuje kolejkę na pierwszym kroku, którego nie da się
 jednoznacznie potwierdzić. Ocena jest wtedy sekwencyjna — decyzja musi być
 znana, zanim automat kliknie cokolwiek na otwartej stronie.
@@ -93,7 +111,10 @@ nie doliczało ich ponownie.
 
 ## Prompt
 
-Domyślny prompt stosuje regułę `Probability of REJECT > 40% → REJECT`. Można go
+Domyślny prompt stosuje regułę `Probability of REJECT > 65% → REJECT` —
+odrzuca tylko przy wyraźnej pewności modelu, bo APPROVE i tak przechodzi przez
+człowieka (zwłaszcza z `--approve-without-assign`), a REJECT wysyła
+nieodwracalny mail. Można go
 edytować w panelu w karcie `Initial assessment` albo podać przez
 `--assessment-prompt-file=...`.
 

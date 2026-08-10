@@ -18,8 +18,13 @@ import {
   screeningProgressPath,
   screeningResumeDecision,
 } from "../screening-progress.js";
-import { navigateToCompleteChecklistQueue } from "../steps/queue.js";
-import { applyLiveAssessmentDecision } from "./screening.js";
+import {
+  inspectCurrentManuscript,
+  navigateToCompleteChecklistQueue,
+  openViewDetailsByIndex,
+  waitForDetailsPageOrRelogin,
+} from "../steps/queue.js";
+import { applyLiveAssessmentDecision, screeningActionName } from "./screening.js";
 import { context } from "./context.js";
 
 export async function runScreeningFromRun(page) {
@@ -94,6 +99,44 @@ export async function runScreeningFromRun(page) {
       continue;
     }
 
+    // Wyszukiwarka kończy na liście wyników, a decyzję wykonuje się na stronie
+    // szczegółów — bez tego kroku nie ma zakładki Complete Checklist ani
+    // przycisków akcji. Ta sama sekwencja co w reject-from-report.
+    const opened = await openViewDetailsByIndex(page, 0);
+    if (!opened) {
+      results.push({ manuscriptId, status: "view_details_not_found" });
+      await context.log("screening_from_run_view_details_not_found", { manuscriptId });
+      console.log(`[${position}] ${manuscriptId} -> nie udało się otworzyć szczegółów, pomijam`);
+      await navigateToCompleteChecklistQueue(page);
+      continue;
+    }
+
+    const detailsReady = await waitForDetailsPageOrRelogin(page, `from-run-open-${manuscriptId}`);
+    if (!detailsReady) {
+      results.push({ manuscriptId, status: "login_interrupted_open_details" });
+      await context.log("screening_from_run_login_interrupted", { manuscriptId });
+      await navigateToCompleteChecklistQueue(page);
+      continue;
+    }
+
+    // Akcja nieodwracalna wymaga pewności, że otwarta strona to właściwy
+    // artykuł, a nie inny wynik wyszukiwania.
+    const details = await inspectCurrentManuscript(page);
+    if (normalizeManuscriptId(details.manuscriptId) !== manuscriptId) {
+      results.push({
+        manuscriptId,
+        status: "id_mismatch",
+        foundManuscriptId: details.manuscriptId,
+      });
+      await context.log("screening_from_run_id_mismatch", {
+        manuscriptId,
+        foundManuscriptId: details.manuscriptId,
+      });
+      console.error(`[${position}] ${manuscriptId} -> otwarto ${details.manuscriptId || "inny artykuł"}, pomijam`);
+      await navigateToCompleteChecklistQueue(page);
+      continue;
+    }
+
     await markScreeningProgress(progress, progressPath, manuscriptId, {
       status: "attempted",
       decision: decision.decision,
@@ -127,7 +170,7 @@ export async function runScreeningFromRun(page) {
         runId: context.runId,
         mode: "screening-from-run",
         manuscriptId,
-        action: decision.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+        action: screeningActionName(decision),
         outcome: "sent",
         confirmed: true,
         detail: decision.reason,
@@ -141,7 +184,7 @@ export async function runScreeningFromRun(page) {
         runId: context.runId,
         mode: "screening-from-run",
         manuscriptId,
-        action: decision.decision === "REJECT" ? "reject-email" : "approve-and-assign",
+        action: screeningActionName(decision),
         outcome: "failed",
         confirmed: false,
         detail: error.message,

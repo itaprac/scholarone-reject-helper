@@ -126,6 +126,14 @@ export const FIELDS = Object.freeze({
   screeningScanAll: {
     flag: "scan-all-metadata", type: "bool", default: true, label: "Entire queue",
   },
+  // Tylko przebiegi wykonujące decyzje (live i from-run) — dlatego flaga nie
+  // wchodzi do pól trybu screening, a job-args dokleja ją warunkowo, tak jak
+  // screeningRejectMessage.
+  screeningApproveWithoutAssign: {
+    flag: "approve-without-assign", type: "bool",
+    default: false, label: "Approve without assigning editors",
+    help: "APPROVE tylko klika Approve; artykuł czeka w Awaiting EIC Assignment na ręczne dobranie edytorów po przejrzeniu PDF.",
+  },
   screeningKeepOpen: {
     flag: "keep-open", type: "bool", default: false, label: "Keep browser open",
   },

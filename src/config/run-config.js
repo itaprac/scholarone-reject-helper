@@ -69,6 +69,9 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
     scanAllMetadata: parseBool(args["scan-all-metadata"] ?? env.SCAN_ALL_METADATA, false),
     assessWithLlm: args["assess-with-llm"] === true,
     applyAssessmentDecisions: args["apply-assessment-decisions"] === true,
+    // APPROVE klika tylko Approve — artykuł zostaje w Awaiting EIC Assignment,
+    // a edytorów dobiera człowiek po przejrzeniu PDF. Rewizje idą pełną ścieżką.
+    approveWithoutAssign: args["approve-without-assign"] === true,
     assessmentModel: args["assessment-model"] || env.ASSESSMENT_MODEL || DEFAULT_ASSESSMENT_MODEL,
     assessmentReasoningEffort:
       args["assessment-reasoning-effort"] ||
@@ -131,6 +134,10 @@ export function applyModeRules(config) {
 
   if (config.applyAssessmentDecisions && (!config.collectMetadata || !config.assessWithLlm)) {
     throw new Error("--apply-assessment-decisions wymaga --collect-metadata i --assess-with-llm.");
+  }
+
+  if (config.approveWithoutAssign && !config.applyAssessmentDecisions && !config.screeningFromRun) {
+    throw new Error("--approve-without-assign działa tylko z --apply-assessment-decisions albo --from-run.");
   }
 
   return config;

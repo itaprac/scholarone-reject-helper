@@ -123,6 +123,31 @@ test("an approved revision continues when ScholarOne keeps its existing EIC and 
   }
 });
 
+test("approve without assigning leaves the manuscript awaiting EIC assignment", async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+
+  try {
+    await page.setContent(checklistPage("<b>Editor-in-Chief List</b>"));
+
+    const result = await approveAndAssignEditors(page, {
+      skipEditorAssignment: true,
+      timeout: 250,
+    });
+
+    assert.equal(result.completed, true);
+    assert.equal(result.awaitingEditorAssignment, true);
+    assert.equal(result.approval.clicked, true);
+    assert.equal(result.approval.nextStep, "Editor-in-Chief List");
+    assert.equal(result.editorInChief.assigned, false);
+    assert.equal(result.editorInChief.source, "left-for-manual-assignment");
+    assert.equal(result.associateEditor.assigned, false);
+    assert.ok(result.checklist.items.every((item) => item.checked));
+  } finally {
+    await browser.close();
+  }
+});
+
 function assignmentPage(heading, roleToken, nextBody) {
   return `<!doctype html><html><body>
     <b>${heading}</b>
