@@ -8,6 +8,7 @@ import {
   isReviewerCandidateSkipped,
   isReviewerManuscriptSkippedResult,
   isReviewerSearchDeferredResult,
+  rememberProcessedReviewerManuscript,
   rememberDeferredReviewer,
   reviewerArticleSkipReason,
   reviewerQueueLabels,
@@ -19,6 +20,19 @@ test("combined reviewer mode drains Invite Reviewers before Assign/Select Review
   assert.deepEqual(reviewerQueueLabels("combined"), ["Invite Reviewers", "Assign Reviewers", "Select Reviewers"]);
   assert.deepEqual(reviewerQueueLabels("invite"), ["Invite Reviewers"]);
   assert.deepEqual(reviewerQueueLabels("select"), ["Assign Reviewers", "Select Reviewers"]);
+});
+
+test("a reviewer run never processes the same finished manuscript twice", () => {
+  const processed = new Set();
+  assert.equal(rememberProcessedReviewerManuscript(processed, {
+    status: "invite_all_confirmed",
+    manuscript: { manuscriptId: "KES-26-0001" },
+  }), true);
+  assert.equal(rememberProcessedReviewerManuscript(processed, {
+    status: "reviewer_search_deferred",
+    manuscript: { manuscriptId: "KES-26-0002" },
+  }), false);
+  assert.deepEqual([...processed], ["KES-26-0001"]);
 });
 
 test("an unusual-activity alert skips reviewer handling before any invitation work", () => {

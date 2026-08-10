@@ -145,6 +145,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
     const results = [];
     const deferredReviewers = [];
     const skippedManuscriptIds = new Set();
+    const processedManuscriptIds = new Set(config.initialExcludedManuscriptIds);
     let queueExhausted = false;
 
     for (batchIndex = 1; batchIndex <= config.maxManuscripts; batchIndex += 1) {
@@ -165,12 +166,14 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           excludedManuscriptIds: [
             ...deferredReviewers.map(({ manuscriptId }) => manuscriptId),
             ...skippedManuscriptIds,
+            ...processedManuscriptIds,
           ],
         });
         if (isReviewerSearchDeferredResult(result)) {
           rememberDeferredReviewer(deferredReviewers, result, batchIndex);
         } else {
           results.push(result);
+          rememberProcessedReviewerManuscript(processedManuscriptIds, result);
           if (isReviewerManuscriptSkippedResult(result)) {
             skippedManuscriptIds.add(result.manuscript.manuscriptId);
           }
@@ -274,6 +277,14 @@ export function isReviewerSearchDeferredResult(result) {
 
 export function isReviewerManuscriptSkippedResult(result) {
   return result?.status === "reviewer_manuscript_skipped";
+}
+
+export function rememberProcessedReviewerManuscript(processed, result) {
+  if (isReviewerSearchDeferredResult(result)) return false;
+  const manuscriptId = result?.manuscript?.manuscriptId;
+  if (!manuscriptId) return false;
+  processed.add(manuscriptId);
+  return true;
 }
 
 export function reviewerArticleSkipReason(bodyText) {
@@ -816,6 +827,10 @@ function buildConfig(args, env, credentials) {
     inviteAll: parseBool(args["invite-all"], false),
     reviewerQueueMode,
     resumeInviteReviewers: reviewerQueueMode === "invite",
+    initialExcludedManuscriptIds: String(args["exclude-manuscript-ids"] || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
     headless: parseBool(args.headless ?? env.HEADLESS, false),
     headed: args.headed === true,
     browserChannel: args["browser-channel"] || env.BROWSER_CHANNEL || "",

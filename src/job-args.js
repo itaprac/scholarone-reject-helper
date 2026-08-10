@@ -31,6 +31,9 @@ export function buildReviewerJobArgs(mode, body) {
   if (definition.live) {
     args.push("--invite-all");
   }
+  if (body.reviewerExcludeManuscriptIds) {
+    args.push(`--exclude-manuscript-ids=${body.reviewerExcludeManuscriptIds}`);
+  }
 
   args.push(...valueArgs(definition.fields, body));
   args.push(...flagArgs(definition.trailing, body));

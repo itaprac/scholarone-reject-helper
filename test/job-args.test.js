@@ -118,11 +118,13 @@ test("builds a combined reviewer queue that resumes before selecting new papers"
     reviewerMaxManuscripts: "3",
     reviewerSlowMo: "500",
     reviewerRefreshWaitSeconds: "120",
+    reviewerExcludeManuscriptIds: "KES-26-0001,KES-26-0002",
   }), [
     "--select-reviewers",
     "--headed",
     "--reviewer-queue=combined",
     "--invite-all",
+    "--exclude-manuscript-ids=KES-26-0001,KES-26-0002",
     "--reviewers-per-paper=10",
     "--max-manuscripts=3",
     "--slow-mo=500",
