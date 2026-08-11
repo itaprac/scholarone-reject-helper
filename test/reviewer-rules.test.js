@@ -34,7 +34,7 @@ test("uses email as the strongest key", () => {
   ), false);
 });
 
-test("classifies Agreed, Declined, Overdue, and Invite for target counting", () => {
+test("counts selected, invited and agreed reviewers toward the target", () => {
   const reviewers = [
     { name: "One", status: "Agreed", history: "Agreed: 01-Jul-2026" },
     { name: "Two", status: "Agreed", history: "Overdue Time in Review: 30 Days" },
@@ -44,6 +44,7 @@ test("classifies Agreed, Declined, Overdue, and Invite for target counting", () 
     { name: "Six", status: "Auto-Declined invite again", history: "Invited: 01-Jun-2026" },
     { name: "Seven", status: "Unavailable invite again", history: "Invited: 01-Jun-2026" },
     { name: "Eight", status: "", history: "Selected: 13-Jul-2026 view full history" },
+    { name: "Nine", status: "Invited", history: "Invited: 10-Aug-2026" },
   ];
 
   assert.deepEqual(reviewers.map(classifyReviewerStatus).map(({ status, overdue }) => ({ status, overdue })), [
@@ -55,8 +56,9 @@ test("classifies Agreed, Declined, Overdue, and Invite for target counting", () 
     { status: "auto-declined", overdue: false },
     { status: "unavailable", overdue: false },
     { status: "selected", overdue: false },
+    { status: "invited", overdue: false },
   ]);
-  assert.equal(countReviewersTowardTarget(reviewers), 4);
+  assert.equal(countReviewersTowardTarget(reviewers), 5);
 });
 
 test("counts ScholarOne selections stored only in History", () => {

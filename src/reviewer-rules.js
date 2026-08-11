@@ -112,8 +112,8 @@ export function classifyReviewerStatus(reviewer) {
 
 export function reviewerCountsTowardTarget(reviewer) {
   const { status, overdue } = classifyReviewerStatus(reviewer);
-  if (status === "invite" || status === "selected") {
-    return true;
+  if (["invite", "selected", "invited"].includes(status)) {
+    return !overdue;
   }
   return status === "agreed" && !overdue;
 }

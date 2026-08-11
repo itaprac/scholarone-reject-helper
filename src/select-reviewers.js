@@ -781,12 +781,14 @@ export function reviewerSelectionPolicy(manuscriptId, queueLabel, reviewers) {
   const isInviteQueue = queueLabel === "Invite Reviewers";
   const hasReviewerNeedingReplacement = reviewers.some(reviewerNeedsReplacement);
 
-  if (isRevision && isInviteQueue && !hasReviewerNeedingReplacement) {
+  if (isRevision) {
     return {
       isRevision,
       isInviteQueue,
-      addNewReviewers: false,
-      reason: "revision_reuses_existing_reviewers",
+      addNewReviewers: hasReviewerNeedingReplacement,
+      reason: hasReviewerNeedingReplacement
+        ? "revision_has_reviewer_needing_replacement"
+        : "revision_reuses_existing_reviewers",
     };
   }
 
@@ -796,9 +798,7 @@ export function reviewerSelectionPolicy(manuscriptId, queueLabel, reviewers) {
     addNewReviewers: true,
     reason: !isInviteQueue
       ? "select_reviewers_queue_fills_target"
-      : isRevision
-        ? "revision_has_reviewer_needing_replacement"
-        : "original_submission_fills_reviewer_target",
+      : "original_submission_fills_reviewer_target",
   };
 }
 

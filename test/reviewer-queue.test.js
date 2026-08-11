@@ -154,14 +154,26 @@ test("an original submission still fills the configured reviewer target", () => 
   });
 });
 
-test("the revision exception does not change the Select Reviewers queue", () => {
-  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R1", "Select Reviewers", [
+test("a revision reuses prior reviewers also in Assign/Select Reviewers", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R1", "Assign Reviewers", [
     { name: "Previously Selected", status: "Selected" },
   ]), {
     isRevision: true,
     isInviteQueue: false,
+    addNewReviewers: false,
+    reason: "revision_reuses_existing_reviewers",
+  });
+});
+
+test("a revision in Assign Reviewers may replace a reviewer only after refusal", () => {
+  assert.deepEqual(reviewerSelectionPolicy("KES-26-0116.R1", "Assign Reviewers", [
+    { name: "Previously Selected", status: "Selected" },
+    { name: "Prior Reviewer", status: "Declined" },
+  ]), {
+    isRevision: true,
+    isInviteQueue: false,
     addNewReviewers: true,
-    reason: "select_reviewers_queue_fills_target",
+    reason: "revision_has_reviewer_needing_replacement",
   });
 });
 
