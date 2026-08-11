@@ -92,6 +92,19 @@ test("recognizes reviewer statuses that allow a replacement", () => {
     history: "Overdue Time in Review: 30 Days",
   }), false);
   assert.equal(reviewerNeedsReplacement({ status: "Invited" }), false);
+  const now = new Date("2026-08-10T00:00:00Z");
+  assert.equal(reviewerNeedsReplacement({
+    status: "Invited",
+    history: "Invited: 11-Jun-2026 view full history",
+  }, { now, noResponseDays: 60 }), true);
+  assert.equal(countReviewersTowardTarget([{
+    status: "Invited",
+    history: "Invited: 11-Jun-2026 view full history",
+  }], { now, noResponseDays: 60 }), 0);
+  assert.equal(reviewerNeedsReplacement({
+    status: "Invited",
+    history: "Invited: 12-Jun-2026 view full history",
+  }, { now, noResponseDays: 60 }), false);
   assert.equal(reviewerNeedsReplacement({ status: "Agreed" }), false);
 });
 

@@ -1,3 +1,5 @@
+import { parseDateLoose } from "./manuscript-rules.js";
+
 export function normalizeEmail(value) {
   return String(value || "").trim().toLocaleLowerCase("en-US");
 }
@@ -110,22 +112,68 @@ export function classifyReviewerStatus(reviewer) {
   return { status, overdue, text };
 }
 
-export function reviewerCountsTowardTarget(reviewer) {
+function parseReviewerInvitationDate(value) {
+  const textual = String(value || "").match(/^(\d{1,2})[-/]([A-Za-z]{3,9})[-/](\d{2,4})$/);
+  if (textual) {
+    const months = {
+      jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+      apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+      aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9,
+      nov: 10, november: 10, dec: 11, december: 11,
+    };
+    const month = months[textual[2].toLowerCase()];
+    if (month !== undefined) {
+      const yearValue = Number(textual[3]);
+      const year = yearValue < 100 ? yearValue + 2000 : yearValue;
+      return new Date(Date.UTC(year, month, Number(textual[1])));
+    }
+  }
+  const parsed = parseDateLoose(String(value || ""));
+  if (!parsed) return null;
+  return new Date(Date.UTC(parsed.getFullYear(), parsed.getMonth(), parsed.getDate()));
+}
+
+export function reviewerInvitationAgeDays(reviewer, { now = new Date() } = {}) {
+  const history = String(reviewer?.history || "");
+  const matches = [...history.matchAll(
+    /\bInvited\s*:\s*(\d{1,2}[-/][A-Za-z]{3,9}[-/]\d{2,4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/gi
+  )];
+  const dates = matches
+    .map((match) => parseReviewerInvitationDate(match[1]))
+    .filter(Boolean)
+    .filter((date) => date.getTime() <= now.getTime())
+    .sort((left, right) => right.getTime() - left.getTime());
+  if (!dates.length) return null;
+  const older = Date.UTC(dates[0].getUTCFullYear(), dates[0].getUTCMonth(), dates[0].getUTCDate());
+  const newer = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.floor((newer - older) / 86_400_000);
+}
+
+export function reviewerCountsTowardTarget(reviewer, options = {}) {
   const { status, overdue } = classifyReviewerStatus(reviewer);
-  if (["invite", "selected", "invited"].includes(status)) {
+  const noResponseDays = options.noResponseDays ?? 60;
+  if (status === "invited") {
+    const age = reviewerInvitationAgeDays(reviewer, options);
+    return age === null || age < noResponseDays;
+  }
+  if (["invite", "selected"].includes(status)) {
     return !overdue;
   }
   return status === "agreed" && !overdue;
 }
 
-export function countReviewersTowardTarget(reviewers) {
-  return reviewers.filter(reviewerCountsTowardTarget).length;
+export function countReviewersTowardTarget(reviewers, options = {}) {
+  return reviewers.filter((reviewer) => reviewerCountsTowardTarget(reviewer, options)).length;
 }
 
-export function reviewerNeedsReplacement(reviewer) {
+export function reviewerNeedsReplacement(reviewer, options = {}) {
   const { status, overdue } = classifyReviewerStatus(reviewer);
-  if (["selected", "invite", "invited"].includes(status)) {
+  if (["selected", "invite"].includes(status)) {
     return false;
+  }
+  if (status === "invited") {
+    const age = reviewerInvitationAgeDays(reviewer, options);
+    return age !== null && age >= (options.noResponseDays ?? 60);
   }
   return overdue || [
     "declined",
