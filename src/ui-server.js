@@ -13,6 +13,8 @@ import { runDoctorChecks } from "./doctor.js";
 import { applyProgressLine, createProgressState } from "./job-progress.js";
 import { tailSince } from "./job-tail.js";
 import { listScreeningRuns, readScreeningRun } from "./screening-runs.js";
+import { buildRunConfig } from "./config/run-config.js";
+import { fetchScholarOneStatus } from "./scholarone-status.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
@@ -30,6 +32,9 @@ const envDefaults = loadEnvFile(path.join(projectRoot, ".env"));
 const jobs = new Map();
 let activeJobId = null;
 let nextJobId = 1;
+let scholarOneStatusCache = null;
+let scholarOneStatusRefresh = null;
+const scholarOneStatusCacheMs = 2 * 60 * 1000;
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -88,6 +93,12 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/api/doctor" && req.method === "GET") {
       return sendJson(res, { checks: await runDoctorChecks() });
+    }
+
+    if (url.pathname === "/api/scholarone/status" && req.method === "GET") {
+      return sendJson(res, await readScholarOneStatus({
+        force: url.searchParams.get("refresh") === "1",
+      }));
     }
 
     if (url.pathname === "/api/settings" && req.method === "POST") {
@@ -476,6 +487,65 @@ async function publicConfig() {
     settingsPath: relativeProjectPath(settingsPath),
     settingsSaved: fs.existsSync(settingsPath),
     ...buildPublicConfig({ saved, envValue, rejectMessage: loadRejectMessage }),
+  };
+}
+
+async function readScholarOneStatus({ force = false } = {}) {
+  const cacheAge = scholarOneStatusCache
+    ? Date.now() - new Date(scholarOneStatusCache.fetchedAt).getTime()
+    : Number.POSITIVE_INFINITY;
+  if (!force && cacheAge < scholarOneStatusCacheMs) {
+    return scholarOneStatusCache;
+  }
+
+  const running = activeJobId ? jobs.get(activeJobId) : null;
+  if (running && ["running", "stopping"].includes(running.status)) {
+    return unavailableScholarOneStatus(
+      "busy",
+      "Status odświeży się po zakończeniu aktywnego joba, który używa profilu ScholarOne."
+    );
+  }
+
+  if (scholarOneStatusRefresh) return scholarOneStatusRefresh;
+
+  scholarOneStatusRefresh = (async () => {
+    try {
+      const runConfig = buildRunConfig([], { envFile: path.join(projectRoot, ".env") });
+      const uiConfig = await publicConfig();
+      const status = await fetchScholarOneStatus({
+        startUrl: uiConfig.startUrl || runConfig.startUrl,
+        profileDir: runConfig.profileDir,
+        browserChannel: runConfig.browserChannel,
+        credentials: {
+          username: runConfig.loginUsername,
+          password: runConfig.loginPassword,
+        },
+        autoLogin: runConfig.autoLogin,
+      });
+      scholarOneStatusCache = status;
+      return status;
+    } catch (error) {
+      return unavailableScholarOneStatus(
+        error.code || "unavailable",
+        error.message || "Nie udało się odczytać statusu ScholarOne."
+      );
+    } finally {
+      scholarOneStatusRefresh = null;
+    }
+  })();
+
+  return scholarOneStatusRefresh;
+}
+
+function unavailableScholarOneStatus(state, message) {
+  return {
+    state,
+    message,
+    attemptedAt: new Date().toISOString(),
+    stale: Boolean(scholarOneStatusCache),
+    fetchedAt: scholarOneStatusCache?.fetchedAt || null,
+    source: scholarOneStatusCache?.source || null,
+    queues: scholarOneStatusCache?.queues || [],
   };
 }
 

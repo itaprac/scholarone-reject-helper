@@ -74,12 +74,15 @@ tr.report-row {
   display: flex;
   gap: 4px;
   width: min(1180px, calc(100% - 32px));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   margin: 0 auto;
   padding-top: 12px;
   border-bottom: 1px solid var(--line);
 }
 
 .mode-tab {
+  flex: none;
   min-height: 38px;
   margin-bottom: -1px;
   border-color: transparent;
@@ -415,6 +418,151 @@ button.danger:hover:not(:disabled) {
   font-size: 12px;
 }
 
+.queue-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.queue-status-main,
+.queue-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.queue-status-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.queue-status-dot[data-state="loading"] {
+  background: var(--accent);
+  animation: queue-status-pulse 1.4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+.queue-status-dot[data-state="ready"] {
+  background: var(--positive);
+}
+
+.queue-status-dot[data-state="stale"] {
+  background: var(--warn);
+}
+
+.queue-status-dot[data-state="bad"] {
+  background: var(--danger);
+}
+
+@keyframes queue-status-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+.queue-status-label {
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.queue-status-detail {
+  max-width: 58ch;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.queue-status-facts {
+  display: flex;
+  gap: 22px;
+  margin: 0;
+}
+
+.queue-status-facts dt {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.queue-status-facts dd {
+  margin: 2px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-table {
+  table-layout: fixed;
+}
+
+.queue-table th:first-child,
+.queue-table td:first-child {
+  width: 52%;
+}
+
+.queue-table th:nth-child(2),
+.queue-table td:nth-child(2) {
+  width: 14%;
+  text-align: right;
+}
+
+.queue-table .queue-group-row th {
+  width: auto;
+  border-bottom: 1px solid var(--line);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.queue-status-row th {
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.queue-status-row[data-focus="true"] th {
+  font-weight: 650;
+}
+
+.queue-count {
+  display: inline-block;
+  min-width: 3ch;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.queue-status-row[data-focus="true"][data-has-items="true"] .queue-count {
+  color: var(--accent);
+}
+
+.queue-status-row[data-has-items="false"] .queue-count,
+.queue-workflow,
+.queue-placeholder td {
+  color: var(--muted);
+}
+
+.queue-placeholder td {
+  padding: 28px 10px;
+  text-align: center;
+}
+
 .reviewer-settings-actions {
   margin-top: 20px;
   padding-top: 12px;
@@ -548,6 +696,17 @@ tr.report-row.selected .report-name {
   label.wide {
     grid-column: span 2;
   }
+
+  .queue-status-bar,
+  .queue-status-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .queue-status-actions,
+  .queue-status-actions button {
+    width: 100%;
+  }
 }
 
 @media (max-width: 520px) {
@@ -576,8 +735,28 @@ tr.report-row.selected .report-name {
   .section-title,
   .report-action-bar,
   .run-action-bar,
-  .operation-strip {
+  .operation-strip,
+  .queue-status-facts {
     flex-direction: column;
+  }
+
+  .queue-status-facts {
+    gap: 8px;
+  }
+
+  .queue-table th:first-child,
+  .queue-table td:first-child {
+    width: 72%;
+  }
+
+  .queue-table th:nth-child(2),
+  .queue-table td:nth-child(2) {
+    width: 28%;
+  }
+
+  .queue-table th:nth-child(3),
+  .queue-table td:nth-child(3) {
+    display: none;
   }
 
   .report-action-bar button,

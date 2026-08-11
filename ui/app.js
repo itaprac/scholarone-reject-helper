@@ -8,12 +8,14 @@ const state = {
   pollTimer: null,
   configApplied: false,
   activeView: "reject",
+  scholarOneStatus: null,
 };
 
 const MONITOR_POLL_MS = 2500;
 const MONITOR_TICK_MS = 1000;
 const MONITOR_TAIL = 100;
 const MONITOR_QUIET_AFTER_SECONDS = 45;
+const QUEUE_STATUS_REFRESH_MS = 5 * 60 * 1000;
 
 const monitorState = {
   run: null,
@@ -47,11 +49,21 @@ const els = {
   rejectTab: document.getElementById("rejectTab"),
   screeningTab: document.getElementById("screeningTab"),
   reviewersTab: document.getElementById("reviewersTab"),
+  queuesTab: document.getElementById("queuesTab"),
   monitorTab: document.getElementById("monitorTab"),
   rejectPanel: document.getElementById("rejectPanel"),
   screeningPanel: document.getElementById("screeningPanel"),
   reviewersPanel: document.getElementById("reviewersPanel"),
+  queuesPanel: document.getElementById("queuesPanel"),
   monitorPanel: document.getElementById("monitorPanel"),
+  queueStatusDot: document.getElementById("queueStatusDot"),
+  queueStatusLabel: document.getElementById("queueStatusLabel"),
+  queueStatusDetail: document.getElementById("queueStatusDetail"),
+  queueStatusUpdated: document.getElementById("queueStatusUpdated"),
+  queueStatusSource: document.getElementById("queueStatusSource"),
+  queueStatusBody: document.getElementById("queueStatusBody"),
+  queueTableWrap: document.querySelector(".queue-table-wrap"),
+  refreshQueuesBtn: document.getElementById("refreshQueuesBtn"),
   beaconDot: document.getElementById("beaconDot"),
   beaconStatus: document.getElementById("beaconStatus"),
   beaconNote: document.getElementById("beaconNote"),
@@ -129,11 +141,13 @@ const els = {
 els.rejectTab.addEventListener("click", () => activateView("reject"));
 els.screeningTab.addEventListener("click", () => activateView("screening"));
 els.reviewersTab.addEventListener("click", () => activateView("reviewers"));
+els.queuesTab.addEventListener("click", () => activateView("queues"));
 els.monitorTab.addEventListener("click", () => activateView("monitor"));
 const workflowTabs = [
   { view: "reject", tab: els.rejectTab },
   { view: "screening", tab: els.screeningTab },
   { view: "reviewers", tab: els.reviewersTab },
+  { view: "queues", tab: els.queuesTab },
   { view: "monitor", tab: els.monitorTab },
 ];
 for (const { view, tab } of workflowTabs) {
@@ -152,6 +166,7 @@ els.reviewersPerPaper.addEventListener("input", renderReviewerBatchSummary);
 els.reviewerQueue.addEventListener("change", renderReviewerBatchSummary);
 els.screeningScope.addEventListener("change", renderScreeningScope);
 bindAsyncClick(els.refreshBtn, refresh);
+bindAsyncClick(els.refreshQueuesBtn, () => refreshScholarOneStatus({ force: true }));
 bindAsyncClick(els.dryRunBtn, runDryRun);
 bindAsyncClick(els.liveRunBtn, runLiveSend);
 bindAsyncClick(els.sendReportBtn, sendSelectedReport);
@@ -175,6 +190,10 @@ refreshDoctor().catch(() => undefined);
 refreshScreeningRuns().catch(() => undefined);
 startRunMonitor();
 refreshJobHistory().catch(() => undefined);
+setInterval(() => {
+  if (state.activeView !== "queues" || !queueStatusIsStale()) return;
+  refreshScholarOneStatus({ force: true }).catch(() => undefined);
+}, 60_000);
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -204,6 +223,136 @@ async function refresh() {
   renderReports();
   renderJob();
   updateActionState();
+}
+
+async function refreshScholarOneStatus({ force = false } = {}) {
+  els.refreshQueuesBtn.disabled = true;
+  els.queueTableWrap.setAttribute("aria-busy", "true");
+  els.queueStatusDot.dataset.state = "loading";
+  els.queueStatusLabel.textContent = "Reading ScholarOne";
+  els.queueStatusDetail.textContent = "Opening Admin Center in the saved Playwright profile.";
+
+  try {
+    const suffix = force ? "?refresh=1" : "";
+    state.scholarOneStatus = await api(`/api/scholarone/status${suffix}`);
+    renderScholarOneStatus();
+  } catch (error) {
+    const previous = state.scholarOneStatus;
+    state.scholarOneStatus = {
+      state: "unavailable",
+      message: error.message,
+      stale: Boolean(previous?.queues?.length),
+      fetchedAt: previous?.fetchedAt || null,
+      source: previous?.source || null,
+      queues: previous?.queues || [],
+    };
+    renderScholarOneStatus();
+  } finally {
+    els.refreshQueuesBtn.disabled = false;
+    els.queueTableWrap.setAttribute("aria-busy", "false");
+  }
+}
+
+function renderScholarOneStatus() {
+  const status = state.scholarOneStatus;
+  if (!status) return;
+
+  const queues = status.queues || [];
+  const ready = status.state === "ready";
+  els.queueStatusDot.dataset.state = ready ? "ready" : status.stale ? "stale" : "bad";
+  els.queueStatusLabel.textContent = ready
+    ? "Live status"
+    : status.stale
+      ? "Saved status"
+      : status.state === "auth_required"
+        ? "Sign-in required"
+        : status.state === "busy"
+          ? "Profile in use"
+          : "Status unavailable";
+  els.queueStatusDetail.textContent = ready
+    ? `${queues.length} queues read successfully.`
+    : status.message || "ScholarOne did not return queue data.";
+  els.queueStatusUpdated.textContent = status.fetchedAt
+    ? `${formatStatusDate(status.fetchedAt)}${status.stale ? " (saved)" : ""}`
+    : "Never";
+  els.queueStatusSource.textContent = formatStatusSource(status.source);
+
+  els.queueStatusBody.replaceChildren();
+  if (queues.length === 0) {
+    const row = document.createElement("tr");
+    row.className = "queue-placeholder";
+    const cell = document.createElement("td");
+    cell.colSpan = 3;
+    cell.textContent = status.message || "No queue counts are available.";
+    row.append(cell);
+    els.queueStatusBody.append(row);
+    return;
+  }
+
+  appendQueueGroup("Operational focus", queues.filter((queue) => queue.focus));
+  appendQueueGroup("Other ScholarOne queues", queues.filter((queue) => !queue.focus));
+}
+
+function appendQueueGroup(label, queues) {
+  if (queues.length === 0) return;
+
+  const headingRow = document.createElement("tr");
+  headingRow.className = "queue-group-row";
+  const heading = document.createElement("th");
+  heading.colSpan = 3;
+  heading.scope = "rowgroup";
+  heading.textContent = label;
+  headingRow.append(heading);
+  els.queueStatusBody.append(headingRow);
+
+  for (const queue of queues) {
+    const row = document.createElement("tr");
+    row.className = "queue-status-row";
+    row.dataset.focus = String(Boolean(queue.focus));
+    row.dataset.hasItems = String(queue.count > 0);
+
+    const name = document.createElement("th");
+    name.scope = "row";
+    name.textContent = queue.label;
+
+    const countCell = document.createElement("td");
+    const count = document.createElement("span");
+    count.className = "queue-count";
+    count.textContent = String(queue.count);
+    countCell.append(count);
+
+    const workflow = document.createElement("td");
+    workflow.className = "queue-workflow";
+    workflow.textContent = queue.workflow;
+
+    row.append(name, countCell, workflow);
+    els.queueStatusBody.append(row);
+  }
+}
+
+function queueStatusIsStale() {
+  const fetchedAt = state.scholarOneStatus?.fetchedAt;
+  if (!fetchedAt) return true;
+  return Date.now() - new Date(fetchedAt).getTime() >= QUEUE_STATUS_REFRESH_MS;
+}
+
+function formatStatusDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Unknown";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(date);
+}
+
+function formatStatusSource(value) {
+  if (!value) return "ScholarOne Admin Center";
+  try {
+    const url = new URL(value);
+    return `${url.host}${url.pathname}`;
+  } catch {
+    return value;
+  }
 }
 
 // Joby przeżywają restart panelu (logs/jobs/), więc "co i kiedy odpalałem"
@@ -881,6 +1030,7 @@ function activateView(view) {
     { name: "reject", tab: els.rejectTab, panel: els.rejectPanel },
     { name: "screening", tab: els.screeningTab, panel: els.screeningPanel },
     { name: "reviewers", tab: els.reviewersTab, panel: els.reviewersPanel },
+    { name: "queues", tab: els.queuesTab, panel: els.queuesPanel },
     { name: "monitor", tab: els.monitorTab, panel: els.monitorPanel },
   ];
   for (const item of views) {
@@ -892,6 +1042,9 @@ function activateView(view) {
   }
   if (view === "monitor") {
     refreshMonitorHistory().catch(() => undefined);
+  }
+  if (view === "queues" && queueStatusIsStale()) {
+    refreshScholarOneStatus({ force: true }).catch(showError);
   }
 }
 
