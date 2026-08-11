@@ -8,6 +8,7 @@ import {
   isReviewerCandidateSkipped,
   isReviewerManuscriptSkippedResult,
   isReviewerSearchDeferredResult,
+  isReviewerWaitingResult,
   rememberProcessedReviewerManuscript,
   rememberDeferredReviewer,
   reviewerArticleSkipReason,
@@ -117,6 +118,16 @@ test("invitation verification includes reviewers selected before a deferred retr
     reviewersPendingInvitation(reviewers).map(({ name }) => name),
     ["Previously Selected", "Newly Selected"]
   );
+});
+
+test("an Assign Reviewers item with no selected reviewers is a safe waiting state", () => {
+  const reviewers = [
+    { name: "Already Invited", status: "Invited", history: "Invited: 11-Aug-2026" },
+    { name: "Declined", status: "Declined invite again", history: "Declined: 09-Aug-2026" },
+  ];
+  assert.deepEqual(reviewersPendingInvitation(reviewers), []);
+  assert.equal(isReviewerWaitingResult({ status: "reviewers_already_invited_waiting" }), true);
+  assert.equal(isReviewerWaitingResult({ status: "invite_all_confirmed" }), false);
 });
 
 test("a revision invites its selected reviewers without adding new candidates", () => {

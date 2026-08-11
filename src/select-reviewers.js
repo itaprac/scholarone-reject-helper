@@ -279,6 +279,10 @@ export function isReviewerManuscriptSkippedResult(result) {
   return result?.status === "reviewer_manuscript_skipped";
 }
 
+export function isReviewerWaitingResult(result) {
+  return result?.status === "reviewers_already_invited_waiting";
+}
+
 export function rememberProcessedReviewerManuscript(processed, result) {
   if (isReviewerSearchDeferredResult(result)) return false;
   const manuscriptId = result?.manuscript?.manuscriptId;
@@ -594,6 +598,21 @@ async function runOneReviewerManuscript(page, {
       counters: beforeInviteCounters,
       reviewers: beforeInviteReviewers.map(publicReviewer),
     });
+
+    if (reviewersToInvite.length === 0) {
+      const result = {
+        status: "reviewers_already_invited_waiting",
+        reason: "no_selected_reviewers_to_invite",
+        manuscript,
+        queueLabel,
+        target: config.reviewersPerPaper,
+        countTowardTarget: countReviewersTowardTarget(beforeInviteReviewers),
+        counters: beforeInviteCounters,
+        logFile,
+      };
+      await log("reviewer_invitation_not_required", result);
+      return result;
+    }
 
     stage = "opening_invite_popup";
     const invitePopup = await openInviteAllPopup(page, log);
