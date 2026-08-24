@@ -660,14 +660,30 @@ async function runOneReviewerManuscript(page, {
       manuscriptId: manuscript.manuscriptId,
     });
 
-    const afterInviteReviewers = await readAllReviewerList(page, log);
     const afterInviteCounters = await readArticleCounters(page);
-    const confirmation = confirmInvitationsSent({
+    let afterInviteReviewers = [];
+    let confirmation = confirmInvitationsSent({
       beforeCounters: beforeInviteCounters,
       afterCounters: afterInviteCounters,
       afterReviewers: afterInviteReviewers,
       expected: reviewersToInvite,
     });
+
+    if (confirmation.confirmed) {
+      await log("invite_all_reviewer_list_not_required", {
+        reason: "invited_counter_increase_confirmed",
+        invitedIncrease: confirmation.invitedIncrease,
+        expectedCount: confirmation.expectedCount,
+      });
+    } else {
+      afterInviteReviewers = await readAllReviewerList(page, log);
+      confirmation = confirmInvitationsSent({
+        beforeCounters: beforeInviteCounters,
+        afterCounters: afterInviteCounters,
+        afterReviewers: afterInviteReviewers,
+        expected: reviewersToInvite,
+      });
+    }
     await log("invite_all_verification", confirmation);
 
     if (!confirmation.confirmed) {
