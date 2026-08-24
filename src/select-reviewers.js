@@ -793,8 +793,8 @@ function isQueueExhaustedError(error) {
     .test(error?.message || "");
 }
 
-function isTargetManuscriptMissingError(error) {
-  return /Nie znaleziono manuskryptu .+ w kolejce (Select|Invite) Reviewers/i
+export function isTargetManuscriptMissingError(error) {
+  return /Nie znaleziono manuskryptu .+ w kolejce (Assign|Select|Invite) Reviewers/i
     .test(error?.message || "");
 }
 

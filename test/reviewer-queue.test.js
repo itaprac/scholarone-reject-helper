@@ -10,6 +10,7 @@ import {
   isReviewerManuscriptSkippedResult,
   isReviewerSearchDeferredResult,
   isReviewerWaitingResult,
+  isTargetManuscriptMissingError,
   rememberProcessedReviewerManuscript,
   rememberDeferredReviewer,
   reviewerArticleSkipReason,
@@ -85,6 +86,14 @@ test("a manuscript missing after safe recovery is skipped and remains reportable
     logFile: "/tmp/reviewers.jsonl",
   });
   assert.equal(isReviewerManuscriptSkippedResult(result), true);
+});
+
+test("missing-target recovery recognizes every supported reviewer queue label", () => {
+  for (const queueLabel of ["Invite Reviewers", "Assign Reviewers", "Select Reviewers"]) {
+    assert.equal(isTargetManuscriptMissingError(
+      new Error(`Nie znaleziono manuskryptu KES-26-0934 w kolejce ${queueLabel}.`)
+    ), true);
+  }
 });
 
 test("deferred reviewer searches remember one exact manuscript and update its retry", () => {
