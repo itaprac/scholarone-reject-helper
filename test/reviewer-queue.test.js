@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { addCandidate } from "../src/reviewers/candidates.js";
 import {
   candidateAddConfirmationState,
   canRecoverReviewerContext,
@@ -94,6 +95,31 @@ test("missing-target recovery recognizes every supported reviewer queue label", 
       new Error(`Nie znaleziono manuskryptu KES-26-0934 w kolejce ${queueLabel}.`)
     ), true);
   }
+});
+
+test("a missing Create Account popup falls through to roster verification", async () => {
+  const events = [];
+  let clicked = false;
+  const locator = {
+    filter() { return this; },
+    first() { return this; },
+    async count() { return 1; },
+    async click() { clicked = true; },
+  };
+  const page = {
+    locator() { return locator; },
+    async waitForEvent() { throw new Error("popup timeout"); },
+    url() { return "https://mc.manuscriptcentral.com/kes#RLSEARCHRESULTS"; },
+  };
+
+  await addCandidate(
+    page,
+    { id: "candidate-1", name: "Yi Zhang", email: "yi@example.com", popupExpected: true },
+    async (type, payload) => events.push({ type, payload })
+  );
+
+  assert.equal(clicked, true);
+  assert.equal(events.at(-1).type, "candidate_add_popup_not_opened");
 });
 
 test("deferred reviewer searches remember one exact manuscript and update its retry", () => {

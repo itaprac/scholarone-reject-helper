@@ -42,7 +42,7 @@ test("distinguishes the exact reviewer queue from another admin queue", {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
-    await page.goto(pathToFileURL(selectQueueSnapshot).href, { waitUntil: "load" });
+    await page.goto(pathToFileURL(selectQueueSnapshot).href, { waitUntil: "domcontentloaded" });
     assert.equal(await detectReviewerPageState(page, "Select Reviewers"), "reviewer_queue");
     assert.equal(await detectReviewerPageState(page, "Invite Reviewers"), "other_admin_queue");
   } finally {
@@ -116,7 +116,7 @@ test("recognizes the Admin Center snapshot", async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
-    await page.goto(pathToFileURL(adminCenterSnapshot).href, { waitUntil: "load" });
+    await page.goto(pathToFileURL(adminCenterSnapshot).href, { waitUntil: "domcontentloaded" });
     assert.equal(await detectReviewerPageState(page), "admin_center");
   } finally {
     await browser.close();
@@ -129,7 +129,7 @@ test("recognizes the reviewer details snapshot", {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   try {
-    await page.goto(pathToFileURL(reviewerArticleSnapshot).href, { waitUntil: "load" });
+    await page.goto(pathToFileURL(reviewerArticleSnapshot).href, { waitUntil: "domcontentloaded" });
     assert.equal(await detectReviewerPageState(page), "reviewer_article");
   } finally {
     await browser.close();

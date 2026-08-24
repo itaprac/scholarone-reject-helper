@@ -140,9 +140,18 @@ export async function addCandidate(page, candidate, log, refreshCurrentReviewerT
 
   await log("candidate_add_started", { candidate: publicPerson(candidate), popupExpected: candidate.popupExpected });
   if (candidate.popupExpected) {
-    const popupPromise = page.waitForEvent("popup", { timeout: 15_000 });
+    const popupPromise = page.waitForEvent("popup", { timeout: 15_000 }).catch(() => null);
     await locator.click();
     const popup = await popupPromise;
+    if (!popup) {
+      await log("candidate_add_popup_not_opened", {
+        candidate: publicPerson(candidate),
+        url: page.url(),
+      });
+      // ScholarOne may apply the Add action without opening the expected popup.
+      // Let confirmCandidateAdded classify the roster as added, unchanged, or ambiguous.
+      return;
+    }
     let popupError;
     try {
       await handleCreateAccountPopup(popup, candidate, log);
