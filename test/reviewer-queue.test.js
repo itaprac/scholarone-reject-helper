@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   candidateAddConfirmationState,
   canRecoverReviewerContext,
+  createMissingReviewerManuscriptSkipResult,
   createAccountBlockingReason,
   findMatchingSimilarAccount,
   isReviewerCandidateSkipped,
@@ -73,6 +74,17 @@ test("recovery follows an exact manuscript only before invitations are sent", ()
     stage: "verifying_invitations",
   }), false);
   assert.equal(canRecoverReviewerContext({ stage: "selecting_reviewers" }), false);
+});
+
+test("a manuscript missing after safe recovery is skipped and remains reportable", () => {
+  const result = createMissingReviewerManuscriptSkipResult("KES-26-0934", "/tmp/reviewers.jsonl");
+  assert.deepEqual(result, {
+    status: "reviewer_manuscript_skipped",
+    reason: "missing_after_safe_recovery",
+    manuscript: { manuscriptId: "KES-26-0934" },
+    logFile: "/tmp/reviewers.jsonl",
+  });
+  assert.equal(isReviewerManuscriptSkippedResult(result), true);
 });
 
 test("deferred reviewer searches remember one exact manuscript and update its retry", () => {

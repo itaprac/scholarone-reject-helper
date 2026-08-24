@@ -279,6 +279,15 @@ export function isReviewerManuscriptSkippedResult(result) {
   return result?.status === "reviewer_manuscript_skipped";
 }
 
+export function createMissingReviewerManuscriptSkipResult(manuscriptId, logFile) {
+  return {
+    status: "reviewer_manuscript_skipped",
+    reason: "missing_after_safe_recovery",
+    manuscript: { manuscriptId },
+    logFile,
+  };
+}
+
 export function isReviewerWaitingResult(result) {
   return result?.status === "reviewers_already_invited_waiting";
 }
@@ -461,11 +470,15 @@ async function recoverReviewerManuscript(page, options, originalError) {
     }
   }
 
-  const error = new Error(
-    `Nie udało się wznowić ${manuscriptId} po ponownym logowaniu w Invite Reviewers ani Assign/Select Reviewers.`
-  );
-  error.cause = lastError;
-  throw error;
+  const result = createMissingReviewerManuscriptSkipResult(manuscriptId, options.logFile);
+  await log("reviewer_manuscript_skipped", {
+    ...result,
+    batchIndex,
+    failedStage: originalError.reviewerContext.stage,
+    failedQueue: originalError.reviewerContext.queueLabel,
+    cause: lastError?.message,
+  });
+  return result;
 }
 
 async function returnToReviewerStart(page, config, log, reason) {
