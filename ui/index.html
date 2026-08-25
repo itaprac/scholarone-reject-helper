@@ -21,6 +21,7 @@
     <nav class="mode-tabs" role="tablist" aria-label="Workflow">
       <button id="rejectTab" class="mode-tab selected" type="button" role="tab" aria-selected="true" aria-controls="rejectPanel">Auto-reject</button>
       <button id="screeningTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="screeningPanel">Initial assessment</button>
+      <button id="eicAssessmentTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="eicAssessmentPanel">EIC assessment</button>
       <button id="reviewersTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="reviewersPanel">Reviewers</button>
       <button id="queuesTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="queuesPanel">Queues</button>
       <button id="monitorTab" class="mode-tab" type="button" role="tab" aria-selected="false" aria-controls="monitorPanel">Monitor</button>
@@ -272,6 +273,145 @@
                 </tr>
               </thead>
               <tbody id="screeningResultsBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <div id="eicAssessmentPanel" role="tabpanel" aria-labelledby="eicAssessmentTab" hidden>
+        <section class="band run-section screening-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Assessment workflow, stage 3</p>
+              <h2>Run a second AI assessment</h2>
+              <p class="section-copy">Assess manuscripts from Awaiting EIC Assignment with a separate, stricter prompt.</p>
+            </div>
+          </div>
+
+          <div class="form-grid screening-core-settings">
+            <label>
+              Scan scope
+              <select id="eicAssessmentScope">
+                <option value="all" selected>Entire queue</option>
+                <option value="limited">Use safety limit</option>
+              </select>
+            </label>
+            <label>
+              Safety limit
+              <input id="eicAssessmentMaxChecked" type="number" min="1" max="100" value="100">
+            </label>
+            <label>
+              Codex model
+              <input id="eicAssessmentModel" type="text" value="gpt-5.6-terra" required>
+            </label>
+            <label>
+              Reasoning effort
+              <select id="eicAssessmentReasoningEffort">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="operation-strip" aria-live="polite">
+            <div>
+              <span class="selection-label">Workflow boundary</span>
+              <strong>Both decisions assign EIC and AE first</strong>
+            </div>
+            <span class="operation-note">APPROVE stops at Assign Reviewers. REJECT then submits “Reject - Fatally Flawed” and sends the configured email. Reviewer selection is never started here.</span>
+          </div>
+
+          <details class="folded-settings">
+            <summary><span>Second assessment rules</span></summary>
+            <label class="assessment-prompt-label">
+              <span class="sr-only">Second assessment rules</span>
+              <textarea id="eicAssessmentPrompt" rows="16" required spellcheck="true"></textarea>
+              <span>This prompt is independent from Initial assessment. The helper appends the title, abstract, and JSON output contract.</span>
+            </label>
+          </details>
+
+          <label class="assessment-prompt-label">
+            Live rejection email
+            <textarea id="eicAssessmentRejectMessage" rows="10" required spellcheck="true"></textarea>
+            <span>Used only when this workflow returns REJECT in live mode.</span>
+          </label>
+
+          <details class="advanced-settings">
+            <summary>Advanced assessment settings</summary>
+            <div class="form-grid">
+              <label class="wide">
+                Start URL
+                <input id="eicAssessmentStartUrl" type="url" value="https://mc.manuscriptcentral.com/kes">
+              </label>
+              <label>
+                Slow ms
+                <input id="eicAssessmentSlowMo" type="number" min="0" value="500">
+              </label>
+              <label>
+                LLM timeout (seconds)
+                <input id="eicAssessmentTimeoutSeconds" type="number" min="10" max="600" value="120">
+              </label>
+            </div>
+          </details>
+
+          <div class="actions run-actions">
+            <button id="eicAssessmentDryRunBtn" type="button" class="primary">Run second assessment dry run</button>
+            <button id="eicAssessmentLiveRunBtn" type="button" class="danger">Run live decisions</button>
+          </div>
+          <p class="action-help">Both modes save one batch JSON in <code>logs/eic-assessment/</code>. Live mode changes ScholarOne and stops on the first unconfirmed step.</p>
+
+          <div class="actions reviewer-settings-actions">
+            <button id="saveEicAssessmentSettingsBtn" type="button">Save EIC assessment settings</button>
+            <span id="eicAssessmentSettingsStatus" role="status" aria-live="polite">Not saved</span>
+          </div>
+        </section>
+
+        <section class="band results-section">
+          <div class="section-title">
+            <div>
+              <h2>Second assessment results</h2>
+              <p class="section-copy">Review a saved dry run before applying its decisions. The model is not called again during execution.</p>
+            </div>
+            <button id="refreshEicAssessmentRunsBtn" type="button">Refresh</button>
+          </div>
+
+          <div class="results-controls">
+            <label>Run
+              <select id="eicAssessmentRunSelect"></select>
+            </label>
+            <label>Decision
+              <select id="eicAssessmentDecisionFilter">
+                <option value="">All</option>
+                <option value="APPROVE">APPROVE</option>
+                <option value="REJECT">REJECT</option>
+                <option value="ERROR">Errors</option>
+              </select>
+            </label>
+            <strong id="eicAssessmentRunSummary" aria-live="polite">No run selected</strong>
+          </div>
+
+          <div class="run-action-bar">
+            <div>
+              <span class="selection-label">Selected run</span>
+              <strong id="eicAssessmentRunSelection" aria-live="polite">No run selected</strong>
+            </div>
+            <button id="executeEicAssessmentRunBtn" type="button" class="danger" disabled>Execute these decisions</button>
+          </div>
+          <p class="action-help">Manuscripts already handled are skipped. A previously attempted but unconfirmed action requires manual review.</p>
+
+          <div class="table-wrap">
+            <table class="results-table">
+              <thead>
+                <tr>
+                  <th scope="col">Manuscript</th>
+                  <th scope="col">Decision</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">Tokens</th>
+                  <th scope="col">Action</th>
+                </tr>
+              </thead>
+              <tbody id="eicAssessmentResultsBody"></tbody>
             </table>
           </div>
         </section>

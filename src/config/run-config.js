@@ -1,7 +1,10 @@
 import path from "node:path";
 import { DEFAULT_REJECT_MESSAGE } from "../default-message.js";
 import { DEFAULT_SCREENING_REJECT_MESSAGE } from "../default-screening-reject-message.js";
-import { DEFAULT_ASSESSMENT_PROMPT } from "../default-assessment-prompt.js";
+import {
+  DEFAULT_ASSESSMENT_PROMPT,
+  DEFAULT_EIC_ASSESSMENT_PROMPT,
+} from "../default-assessment-prompt.js";
 import {
   DEFAULT_ASSESSMENT_MODEL,
   DEFAULT_ASSESSMENT_REASONING_EFFORT,
@@ -18,6 +21,7 @@ import {
   toOptionalPositiveInteger,
 } from "../core/env.js";
 import { DEFAULTS, projectRoot } from "./defaults.js";
+import { assessmentQueueLabel } from "../assessment-stage.js";
 
 // Zbudowanie konfiguracji przebiegu z argumentów CLI i pliku .env. Wydzielone z
 // auto-reject.js, żeby dało się je wywołać w teście bez uruchamiania automatu.
@@ -27,6 +31,7 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
   const args = parseArgs(rawArgs);
   const env = loadEnvFile(envFile);
   const credentials = loadLoginCredentials(args, env);
+  const assessmentStage = args["assessment-stage"] === "eic" ? "eic" : "initial";
 
   const config = {
     startUrl: args["start-url"] || env.START_URL || DEFAULTS.startUrl,
@@ -69,6 +74,7 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
     scanAllMetadata: parseBool(args["scan-all-metadata"] ?? env.SCAN_ALL_METADATA, false),
     assessWithLlm: args["assess-with-llm"] === true,
     applyAssessmentDecisions: args["apply-assessment-decisions"] === true,
+    assessmentStage,
     // APPROVE klika tylko Approve — artykuł zostaje w Awaiting EIC Assignment,
     // a edytorów dobiera człowiek po przejrzeniu PDF. Rewizje idą pełną ścieżką.
     approveWithoutAssign: args["approve-without-assign"] === true,
@@ -91,18 +97,22 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
       args["no-cache"] !== true,
     assessmentPrompt: loadTextOption(args, env, {
       fileArg: "assessment-prompt-file",
-      fileEnv: "ASSESSMENT_PROMPT_FILE",
+      fileEnv: assessmentStage === "eic" ? "EIC_ASSESSMENT_PROMPT_FILE" : "ASSESSMENT_PROMPT_FILE",
       inlineArg: "assessment-prompt",
-      inlineEnv: "ASSESSMENT_PROMPT",
-      fallback: DEFAULT_ASSESSMENT_PROMPT,
+      inlineEnv: assessmentStage === "eic" ? "EIC_ASSESSMENT_PROMPT" : "ASSESSMENT_PROMPT",
+      fallback: assessmentStage === "eic" ? DEFAULT_EIC_ASSESSMENT_PROMPT : DEFAULT_ASSESSMENT_PROMPT,
       trim: "both",
     }),
     screeningEditorName: args["screening-editor-name"] || DEFAULT_EDITOR_NAME,
     screeningRejectMessage: loadTextOption(args, env, {
       fileArg: "screening-reject-message-file",
-      fileEnv: "SCREENING_REJECT_MESSAGE_FILE",
+      fileEnv: assessmentStage === "eic"
+        ? "EIC_ASSESSMENT_REJECT_MESSAGE_FILE"
+        : "SCREENING_REJECT_MESSAGE_FILE",
       inlineArg: "screening-reject-message",
-      inlineEnv: "SCREENING_REJECT_MESSAGE",
+      inlineEnv: assessmentStage === "eic"
+        ? "EIC_ASSESSMENT_REJECT_MESSAGE"
+        : "SCREENING_REJECT_MESSAGE",
       fallback: DEFAULT_SCREENING_REJECT_MESSAGE,
     }),
     rejectMessage: loadTextOption(args, env, {
@@ -116,6 +126,7 @@ export function buildRunConfig(rawArgs = process.argv.slice(2), {
     logsDir: args["logs-dir"] || DEFAULTS.logsDir,
   };
 
+  config.assessmentQueueLabel = assessmentQueueLabel(config);
   return applyModeRules(config);
 }
 
@@ -138,6 +149,10 @@ export function applyModeRules(config) {
 
   if (config.approveWithoutAssign && !config.applyAssessmentDecisions && !config.screeningFromRun) {
     throw new Error("--approve-without-assign działa tylko z --apply-assessment-decisions albo --from-run.");
+  }
+
+  if (config.assessmentStage === "eic" && config.approveWithoutAssign) {
+    throw new Error("--approve-without-assign nie działa w drugim etapie EIC assessment.");
   }
 
   return config;

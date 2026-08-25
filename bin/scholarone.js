@@ -10,10 +10,15 @@
 //
 // Stare wywołania oparte wprost na flagach (--select-reviewers, --dry-run,
 // --collect-metadata) nadal działają, bo używają ich zapisane skrypty npm.
-import { translateRejectArgs, translateReviewerArgs, translateScreenArgs } from "../src/cli-commands.js";
+import {
+  translateEicScreenArgs,
+  translateRejectArgs,
+  translateReviewerArgs,
+  translateScreenArgs,
+} from "../src/cli-commands.js";
 
 const argv = process.argv.slice(2);
-const COMMANDS = new Set(["reject", "screen", "reviewers", "doctor", "ui", "help"]);
+const COMMANDS = new Set(["reject", "screen", "eic-screen", "reviewers", "doctor", "ui", "help"]);
 const command = COMMANDS.has(argv[0]) ? argv[0] : null;
 const args = command ? argv.slice(1) : argv;
 
@@ -49,6 +54,7 @@ async function dispatch(name, rest) {
   const { runReject } = await import("../src/run-reject.js");
   if (name === "reject") return runReject(translateRejectArgs(rest));
   if (name === "screen") return runReject(translateScreenArgs(rest));
+  if (name === "eic-screen") return runReject(translateEicScreenArgs(rest));
   return runReject(rest);
 }
 
@@ -60,6 +66,8 @@ function printHelp() {
   scholarone reject --send --from-report=PLIK
   scholarone screen --dry-run              ocena LLM bez akcji w ScholarOne
   scholarone screen --live                 wykonaj decyzje oceny
+  scholarone eic-screen --dry-run          druga ocena z Awaiting EIC Assignment
+  scholarone eic-screen --live             przypisz edytorów i wykonaj decyzje
   scholarone reviewers --prepare           dobierz recenzentów bez wysyłki
   scholarone reviewers --invite            dobierz i wyślij zaproszenia
   scholarone doctor                        sprawdź środowisko przed przebiegiem

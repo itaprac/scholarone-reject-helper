@@ -67,14 +67,18 @@ test("offline ScholarOne selectors match every supplied HTML snapshot", async ()
     assert.equal(await createAccount.locator("input[name='EMAIL_ADDRESS']").inputValue(), "reviewer2@example.org");
 
     const firstInviteAllPage = await context.newPage();
-    await firstInviteAllPage.goto(pathToFileURL(files.firstInviteAll).href, { waitUntil: "load" });
+    await firstInviteAllPage.goto(pathToFileURL(files.firstInviteAll).href, {
+      waitUntil: "domcontentloaded",
+    });
     const firstInviteAll = firstInviteAllPage.locator(REVIEWER_SELECTORS.firstInviteAll);
     await firstInviteAll.waitFor({ state: "visible" });
     assert.equal(await firstInviteAll.count(), 1);
     assert.match(await firstInviteAll.getAttribute("href"), /popWindow\(.+invite_all_popup/is);
 
     const invitePopup = await context.newPage();
-    await invitePopup.goto(pathToFileURL(files.invitePopup).href, { waitUntil: "load" });
+    await invitePopup.goto(pathToFileURL(files.invitePopup).href, {
+      waitUntil: "domcontentloaded",
+    });
     const finalInviteAll = invitePopup.locator(REVIEWER_SELECTORS.finalInviteAll);
     await finalInviteAll.waitFor({ state: "visible" });
     assert.equal(await finalInviteAll.count(), 1);

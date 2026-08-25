@@ -7,11 +7,12 @@ import { buildScreeningBatchResult } from "../screening-batch.js";
 import { buildAutomaticRevisionAssessment, classifyScreeningManuscript } from "../screening-assessment.js";
 import { hasUnusualActivityAlert, openAndReadAbstract, readManuscriptSummary, waitForManuscriptMetadataReady } from "../screening-metadata.js";
 import { approveAndAssignEditors } from "../screening-approval.js";
+import { applyEicAssessmentDecision } from "../eic-assessment-actions.js";
 import { formatSingleAssessmentUsage } from "../reporting/artifacts.js";
 import { clickRejectAndFillEmail, clickSaveAndSend } from "../steps/reject-email.js";
 import {
   goToNextDocument,
-  isCompleteChecklistQueueEmpty,
+  isAdminQueueEmpty,
   openNextUnseenViewDetailsAcrossQueuePages,
   returnToList,
   waitForDetailsPageOrRelogin,
@@ -24,10 +25,14 @@ import { createLiveGuard } from "../core/live-guard.js";
 import {
   loadScreeningProgress,
   markScreeningProgress,
-  screeningProgressPath,
   screeningResumeDecision,
 } from "../screening-progress.js";
 import { context } from "./context.js";
+import {
+  assessmentProgressPath,
+  assessmentWorkflowName,
+  isEicAssessment,
+} from "../assessment-stage.js";
 
 export async function runMetadataCollection(page) {
   const provider = createAssessmentProvider(context.config, {
@@ -36,7 +41,7 @@ export async function runMetadataCollection(page) {
   });
 
   const actionLog = createActionLog(context.config.logsDir);
-  const progressPath = screeningProgressPath(context.config.logsDir);
+  const progressPath = assessmentProgressPath(context.config);
   const progress = await loadScreeningProgress(progressPath);
   const liveGuard = createLiveGuard({
     limit: context.config.applyAssessmentDecisions ? context.config.maxLiveActions : null,
@@ -104,9 +109,11 @@ export async function runMetadataCollection(page) {
       seenManuscriptIds.add(manuscriptId);
     }
 
-    const screeningRule = classifyScreeningManuscript(manuscriptId, {
-      hasUnusualActivity: hasUnusualActivityAlert(bodyText),
-    });
+    const screeningRule = isEicAssessment(context.config)
+      ? "assess"
+      : classifyScreeningManuscript(manuscriptId, {
+        hasUnusualActivity: hasUnusualActivityAlert(bodyText),
+      });
     if (screeningRule === "skip-unusual-activity") {
       const skipped = {
         manuscriptId: manuscriptId || null,
@@ -179,7 +186,8 @@ export async function runMetadataCollection(page) {
     }
 
     console.log(`[${checked}] ${summary.manuscriptId} -> tytuł: ${summary.title}`);
-    const isRevision = isRevisionManuscriptId(summary.manuscriptId);
+    const isRevision = !isEicAssessment(context.config) &&
+      isRevisionManuscriptId(summary.manuscriptId);
     const abstract = isRevision ? "" : await openAndReadAbstract(page);
     const metadata = {
       manuscriptId: summary.manuscriptId,
@@ -250,7 +258,7 @@ export async function runMetadataCollection(page) {
 
     if (isRevision) {
       assessment = buildAutomaticRevisionAssessment(summary.manuscriptId);
-      continuation = deriveSimulatedContinuation(assessment.decision);
+      continuation = deriveSimulatedContinuation(assessment.decision, context.config);
       await context.log("revision_automatically_approved", {
         checked,
         manuscriptId: summary.manuscriptId,
@@ -267,7 +275,7 @@ export async function runMetadataCollection(page) {
       );
       try {
         assessment = await provider.assess(metadata);
-        continuation = deriveSimulatedContinuation(assessment.decision);
+        continuation = deriveSimulatedContinuation(assessment.decision, context.config);
 
         await context.log("llm_assessment_completed", {
           checked,
@@ -340,7 +348,7 @@ export async function runMetadataCollection(page) {
         });
         await actionLog.record({
           runId: context.runId,
-          mode: "screening-live",
+          mode: `${assessmentWorkflowName(context.config)}-live`,
           manuscriptId: summary.manuscriptId,
           action: screeningActionName(assessment),
           outcome: "sent",
@@ -370,7 +378,7 @@ export async function runMetadataCollection(page) {
         // wznowienie ma to zgłosić do ręcznego sprawdzenia, a nie powtórzyć.
         await actionLog.record({
           runId: context.runId,
-          mode: "screening-live",
+          mode: `${assessmentWorkflowName(context.config)}-live`,
           manuscriptId: summary.manuscriptId,
           action: screeningActionName(assessment),
           outcome: "failed",
@@ -451,6 +459,8 @@ export async function runMetadataCollection(page) {
     scanAll: context.config.scanAllMetadata,
     maxChecked: context.config.maxChecked,
     queueExhausted,
+    queueLabel: context.config.assessmentQueueLabel,
+    assessmentStage: context.config.assessmentStage,
   });
 }
 
@@ -467,15 +477,15 @@ async function returnToListOrDetectExhausted(page, checked) {
 }
 
 async function detectExhaustedCompleteChecklist(page, error, checked) {
-  if (!(await isCompleteChecklistQueueEmpty(page))) {
+  if (!(await isAdminQueueEmpty(page, context.config.assessmentQueueLabel))) {
     return false;
   }
   await context.log("metadata_queue_exhausted", {
     checked,
-    reason: "Complete Checklist count is 0",
+    reason: `${context.config.assessmentQueueLabel} count is 0`,
     previousError: error?.message || null,
   });
-  console.log("[QUEUE] Complete Checklist jest puste — kończę Initial Assessment poprawnie.");
+  console.log(`[QUEUE] ${context.config.assessmentQueueLabel} jest puste — kończę ${assessmentWorkflowName(context.config)} poprawnie.`);
   return true;
 }
 
@@ -488,7 +498,7 @@ async function assessIntoRecord(provider, record, checked) {
   try {
     const assessment = await provider.assess(record.metadata);
     record.assessment = assessment;
-    record.continuation = deriveSimulatedContinuation(assessment.decision);
+    record.continuation = deriveSimulatedContinuation(assessment.decision, context.config);
 
     await context.log("llm_assessment_completed", {
       checked,
@@ -543,6 +553,11 @@ export function logAssessmentBranch(continuation) {
 // niż pełne approve-and-assign i log ma je rozróżniać. Rewizje zawsze dostają
 // pełny przebieg, więc opcja approveWithoutAssign ich nie dotyczy.
 export function screeningActionName(assessment) {
+  if (isEicAssessment(context.config)) {
+    return assessment.decision === "REJECT"
+      ? "eic-assessment-reject"
+      : "eic-assessment-advance-to-reviewers";
+  }
   if (assessment.decision === "REJECT") return "reject-email";
   return context.config.approveWithoutAssign && assessment.mode !== "automatic-revision"
     ? "approve-awaiting-assignment"
@@ -550,6 +565,13 @@ export function screeningActionName(assessment) {
 }
 
 export async function applyLiveAssessmentDecision(page, assessment) {
+  if (isEicAssessment(context.config)) {
+    return applyEicAssessmentDecision(page, assessment, {
+      editorName: context.config.screeningEditorName,
+      rejectMessage: context.config.screeningRejectMessage,
+    });
+  }
+
   const checklistResult = await clickCompleteChecklist(page);
 
   if (assessment.decision === "APPROVE") {

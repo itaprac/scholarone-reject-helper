@@ -61,6 +61,18 @@ test("maps LLM output to a simulated continuation without a ScholarOne action", 
   });
 });
 
+test("describes the EIC assessment boundary without promising reviewer selection", () => {
+  assert.deepEqual(deriveSimulatedContinuation("APPROVE", { assessmentStage: "eic" }), {
+    allowed: true,
+    action: "WOULD_CONTINUE",
+    note: "Symulacja: workflow przypisałby EIC i AE, a następnie zatrzymał artykuł w Assign Reviewers.",
+  });
+  assert.match(
+    deriveSimulatedContinuation("REJECT", { assessmentStage: "eic" }).note,
+    /Reject - Fatally Flawed/
+  );
+});
+
 test("uses Terra with medium reasoning as the assessment default", () => {
   assert.equal(DEFAULT_ASSESSMENT_MODEL, "gpt-5.6-terra");
   assert.equal(DEFAULT_ASSESSMENT_REASONING_EFFORT, "medium");

@@ -8,8 +8,8 @@ import path from "node:path";
 // Żeby cokolwiek zobaczyć, trzeba było wyjść z panelu i otworzyć plik.
 const RUN_FILE = /^\d{4}-\d{2}-\d{2}T[\d-]+Z\.json$/;
 
-export async function listScreeningRuns(logsDir, { limit = 20 } = {}) {
-  const directory = path.join(logsDir, "screening");
+export async function listScreeningRuns(logsDir, { limit = 20, stage = "initial" } = {}) {
+  const directory = assessmentRunsDirectory(logsDir, stage);
   const files = (await fsp.readdir(directory).catch(() => []))
     .filter((name) => RUN_FILE.test(name));
 
@@ -25,6 +25,7 @@ export async function listScreeningRuns(logsDir, { limit = 20 } = {}) {
       createdAt: payload.createdAt || null,
       status: result.status || "",
       live: Boolean(payload.config?.applyAssessmentDecisions),
+      stage: payload.config?.assessmentStage || "initial",
       summary: result.summary || null,
       manuscriptCount: (result.manuscripts || []).length,
     });
@@ -35,14 +36,14 @@ export async function listScreeningRuns(logsDir, { limit = 20 } = {}) {
     .slice(0, limit);
 }
 
-export async function readScreeningRun(logsDir, filename) {
+export async function readScreeningRun(logsDir, filename, { stage = "initial" } = {}) {
   if (!RUN_FILE.test(filename)) {
     const error = new Error("Nieprawidłowa nazwa pliku wyniku screeningu.");
     error.statusCode = 400;
     throw error;
   }
 
-  const payload = await readJson(path.join(logsDir, "screening", filename));
+  const payload = await readJson(path.join(assessmentRunsDirectory(logsDir, stage), filename));
   if (!payload?.result) {
     const error = new Error("Nie znaleziono wyniku screeningu.");
     error.statusCode = 404;
@@ -53,10 +54,15 @@ export async function readScreeningRun(logsDir, filename) {
     runId: payload.runId,
     createdAt: payload.createdAt,
     live: Boolean(payload.config?.applyAssessmentDecisions),
+    stage: payload.config?.assessmentStage || "initial",
     summary: payload.result.summary || null,
     manuscripts: (payload.result.manuscripts || []).map(toRow),
     skipped: payload.result.skippedUnusualActivity || [],
   };
+}
+
+function assessmentRunsDirectory(logsDir, stage) {
+  return path.join(logsDir, stage === "eic" ? "eic-assessment" : "screening");
 }
 
 // Spłaszczenie zagnieżdżonego wpisu do jednego wiersza tabeli.

@@ -1,11 +1,12 @@
 # ScholarOne helper
 
-Automat Playwright do trzech niezależnych zadań w ScholarOne:
+Automat Playwright do czterech niezależnych zadań w ScholarOne:
 
 | Tryb | Co robi | Dokumentacja |
 |---|---|---|
 | **reject** | sprawdza kolejkę `Complete Checklist` i odrzuca pasujące manuskrypty | [docs/reject.md](docs/reject.md) |
 | **screen** | wstępna ocena tytułu i abstraktu przez LLM, opcjonalnie z wykonaniem decyzji | [docs/screening.md](docs/screening.md) |
+| **eic-screen** | druga, ostrzejsza ocena z `Awaiting EIC Assignment` | [docs/eic-assessment.md](docs/eic-assessment.md) |
 | **reviewers** | dobór i zapraszanie recenzentów z `Select Reviewers` | [docs/reviewers.md](docs/reviewers.md) |
 
 Pełna lista flag: [docs/cli.md](docs/cli.md).
@@ -54,6 +55,7 @@ niczego nie wysyła:
 ```bash
 node bin/scholarone.js reject --dry-run      # tylko sprawdza i zapisuje raport
 node bin/scholarone.js screen --dry-run      # ocenia, nie klika w ScholarOne
+node bin/scholarone.js eic-screen --dry-run  # druga ocena, nie klika w ScholarOne
 node bin/scholarone.js reviewers --prepare   # dobiera recenzentów, nie zaprasza
 ```
 
@@ -93,6 +95,7 @@ logs/
   <runId>.jsonl          pełny log przebiegu
   reports/               raporty dry-runu, wejście dla reject --from-report
   screening/             wyniki oceny LLM + CSV
+  eic-assessment/        wyniki drugiej oceny LLM + CSV
   screenshots/<runId>/   zrzuty ekranu
 ```
 

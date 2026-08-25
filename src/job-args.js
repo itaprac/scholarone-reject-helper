@@ -62,6 +62,39 @@ export function buildScreeningJobArgs(body, { applyDecisions = false } = {}) {
   return args;
 }
 
+export function buildEicAssessmentJobArgs(body, { applyDecisions = false } = {}) {
+  const definition = modeDefinition("eic-assessment");
+  const args = [...definition.flags];
+
+  if (applyDecisions) args.push("--apply-assessment-decisions");
+  if (body.eicAssessmentScanAll) args.push("--scan-all-metadata");
+
+  args.push(...valueArgs(definition.fields, body));
+  if (applyDecisions) {
+    args.push(...valueArgs(["eicAssessmentRejectMessage"], body));
+  }
+  args.push(...flagArgs(definition.trailing, body));
+  return args;
+}
+
+export function buildAssessmentFromRunArgs(body, { run, stage = "initial" } = {}) {
+  if (!run) throw new Error("Wykonanie decyzji wymaga zapisanego przebiegu.");
+  const eic = stage === "eic";
+  const args = ["--headed"];
+  if (eic) args.push("--assessment-stage=eic");
+  args.push(`--from-run=${run}`);
+  args.push(...valueArgs([
+    eic ? "eicAssessmentStartUrl" : "screeningStartUrl",
+    eic ? "eicAssessmentSlowMo" : "screeningSlowMo",
+    eic ? "eicAssessmentRejectMessage" : "screeningRejectMessage",
+  ], body));
+  args.push(...flagArgs([
+    eic ? "eicAssessmentKeepOpen" : "screeningKeepOpen",
+  ], body));
+  if (!eic) args.push(...flagArgs(["screeningApproveWithoutAssign"], body));
+  return args;
+}
+
 function valueArgs(keys, body) {
   const args = [];
   for (const key of keys || []) {

@@ -83,23 +83,30 @@ test("raporty i wyniki screeningu przeżywają domyślne czyszczenie", async () 
   const logsDir = await makeLogsDir();
   const reportsDir = path.join(logsDir, "reports");
   const screeningDir = path.join(logsDir, "screening");
+  const eicAssessmentDir = path.join(logsDir, "eic-assessment");
   await fsp.mkdir(reportsDir, { recursive: true });
   await fsp.mkdir(screeningDir, { recursive: true });
+  await fsp.mkdir(eicAssessmentDir, { recursive: true });
 
   const oldReport = path.join(reportsDir, "2026-01-01T10-00-00-000Z.json");
   const oldScreening = path.join(screeningDir, "2026-01-01T10-00-00-000Z.json");
+  const oldEicAssessment = path.join(eicAssessmentDir, "2026-01-01T10-00-00-000Z.json");
   await fsp.writeFile(oldReport, "{}", "utf8");
   await fsp.writeFile(oldScreening, "{}", "utf8");
+  await fsp.writeFile(oldEicAssessment, "{}", "utf8");
   await age(oldReport, 400);
   await age(oldScreening, 400);
+  await age(oldEicAssessment, 400);
 
   await pruneLogs({ logsDir, keepRuns: 0, maxAgeDays: 1 });
   assert.ok(await exists(oldReport), "raport nie jest logiem debugowym");
   assert.ok(await exists(oldScreening), "wynik screeningu nie jest logiem debugowym");
+  assert.ok(await exists(oldEicAssessment), "wynik EIC assessment nie jest logiem debugowym");
 
   await pruneLogs({ logsDir, keepRuns: 0, maxAgeDays: 1, includeReports: true, includeScreening: true });
   assert.equal(await exists(oldReport), false);
   assert.equal(await exists(oldScreening), false);
+  assert.equal(await exists(oldEicAssessment), false);
 });
 
 test("dry-run raportuje plan bez kasowania", async () => {

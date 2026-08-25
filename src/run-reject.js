@@ -154,9 +154,10 @@ function selectWorkflow(config) {
 }
 
 function describeMode(config) {
-  if (config.screeningFromRun) return "screening-from-run";
+  const prefix = config.assessmentStage === "eic" ? "eic-assessment" : "screening";
+  if (config.screeningFromRun) return `${prefix}-from-run`;
   if (config.collectMetadata) {
-    return config.applyAssessmentDecisions ? "screening-live" : "screening-dryrun";
+    return config.applyAssessmentDecisions ? `${prefix}-live` : `${prefix}-dryrun`;
   }
   if (config.rejectFromReport || config.rejectIds.length) return "reject-from-report";
   if (config.reportOnly) return "reject-dryrun";
@@ -190,6 +191,8 @@ function describeRun(config) {
     scanAllMetadata: config.scanAllMetadata,
     assessWithLlm: config.assessWithLlm,
     applyAssessmentDecisions: config.applyAssessmentDecisions,
+    assessmentStage: config.assessmentStage,
+    assessmentQueueLabel: config.assessmentQueueLabel,
     assessmentModel: config.assessmentModel,
     assessmentReasoningEffort: config.assessmentReasoningEffort,
     assessmentTimeoutSeconds: config.assessmentTimeoutSeconds,

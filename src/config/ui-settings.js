@@ -1,4 +1,7 @@
-import { DEFAULT_ASSESSMENT_PROMPT } from "../default-assessment-prompt.js";
+import {
+  DEFAULT_ASSESSMENT_PROMPT,
+  DEFAULT_EIC_ASSESSMENT_PROMPT,
+} from "../default-assessment-prompt.js";
 import { DEFAULT_SCREENING_REJECT_MESSAGE } from "../default-screening-reject-message.js";
 import { normalizeAssessmentReasoningEffort } from "../assessment-config.js";
 import { parseBool } from "../core/env.js";
@@ -13,7 +16,9 @@ import { UI_DEFAULTS } from "./defaults.js";
 // zawartości plików albo od innej opcji.
 const DYNAMIC_DEFAULTS = {
   assessmentPrompt: () => DEFAULT_ASSESSMENT_PROMPT,
+  eicAssessmentPrompt: () => DEFAULT_EIC_ASSESSMENT_PROMPT,
   screeningRejectMessage: () => DEFAULT_SCREENING_REJECT_MESSAGE,
+  eicAssessmentRejectMessage: () => DEFAULT_SCREENING_REJECT_MESSAGE,
 };
 
 export function buildPublicConfig({ saved = {}, envValue, rejectMessage }) {
@@ -29,6 +34,7 @@ export function buildPublicConfig({ saved = {}, envValue, rejectMessage }) {
   // Adresy startowe trybów dziedziczą po głównym, jeśli nie ustawiono własnego.
   config.reviewerStartUrl = saved.reviewerStartUrl ?? config.startUrl;
   config.screeningStartUrl = saved.screeningStartUrl ?? config.startUrl;
+  config.eicAssessmentStartUrl = saved.eicAssessmentStartUrl ?? config.startUrl;
 
   return config;
 }
@@ -44,6 +50,7 @@ export function normalizeUiSettings(body, { rejectMessage }) {
   if (!settings.rejectMessage) settings.rejectMessage = rejectMessage();
   if (!settings.reviewerStartUrl) settings.reviewerStartUrl = settings.startUrl;
   if (!settings.screeningStartUrl) settings.screeningStartUrl = settings.startUrl;
+  if (!settings.eicAssessmentStartUrl) settings.eicAssessmentStartUrl = settings.startUrl;
 
   for (const [key, fallback] of Object.entries(DYNAMIC_DEFAULTS)) {
     if (!settings[key]) settings[key] = fallback();
@@ -61,7 +68,7 @@ function readValue(key, definition, { saved, envValue }) {
   const raw = envValue(definition.env, String(fallback));
   if (definition.type === "bool") return parseBool(raw, Boolean(fallback));
   if (definition.type === "choice") {
-    return key === "assessmentReasoningEffort"
+    return ["assessmentReasoningEffort", "eicAssessmentReasoningEffort"].includes(key)
       ? normalizeAssessmentReasoningEffort(raw)
       : (definition.choices.includes(raw) ? raw : definition.default);
   }

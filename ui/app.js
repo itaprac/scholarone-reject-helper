@@ -2,6 +2,8 @@ const state = {
   reports: [],
   screeningRuns: [],
   screeningRun: null,
+  eicAssessmentRuns: [],
+  eicAssessmentRun: null,
   selectedReportPath: "",
   currentJob: null,
   stream: null,
@@ -48,11 +50,13 @@ const REPORT_STATUS_LABELS = {
 const els = {
   rejectTab: document.getElementById("rejectTab"),
   screeningTab: document.getElementById("screeningTab"),
+  eicAssessmentTab: document.getElementById("eicAssessmentTab"),
   reviewersTab: document.getElementById("reviewersTab"),
   queuesTab: document.getElementById("queuesTab"),
   monitorTab: document.getElementById("monitorTab"),
   rejectPanel: document.getElementById("rejectPanel"),
   screeningPanel: document.getElementById("screeningPanel"),
+  eicAssessmentPanel: document.getElementById("eicAssessmentPanel"),
   reviewersPanel: document.getElementById("reviewersPanel"),
   queuesPanel: document.getElementById("queuesPanel"),
   monitorPanel: document.getElementById("monitorPanel"),
@@ -136,16 +140,38 @@ const els = {
   refreshScreeningRunsBtn: document.getElementById("refreshScreeningRunsBtn"),
   screeningRunSelection: document.getElementById("screeningRunSelection"),
   executeRunBtn: document.getElementById("executeRunBtn"),
+  eicAssessmentStartUrl: document.getElementById("eicAssessmentStartUrl"),
+  eicAssessmentScope: document.getElementById("eicAssessmentScope"),
+  eicAssessmentMaxChecked: document.getElementById("eicAssessmentMaxChecked"),
+  eicAssessmentSlowMo: document.getElementById("eicAssessmentSlowMo"),
+  eicAssessmentModel: document.getElementById("eicAssessmentModel"),
+  eicAssessmentReasoningEffort: document.getElementById("eicAssessmentReasoningEffort"),
+  eicAssessmentTimeoutSeconds: document.getElementById("eicAssessmentTimeoutSeconds"),
+  eicAssessmentPrompt: document.getElementById("eicAssessmentPrompt"),
+  eicAssessmentRejectMessage: document.getElementById("eicAssessmentRejectMessage"),
+  eicAssessmentDryRunBtn: document.getElementById("eicAssessmentDryRunBtn"),
+  eicAssessmentLiveRunBtn: document.getElementById("eicAssessmentLiveRunBtn"),
+  saveEicAssessmentSettingsBtn: document.getElementById("saveEicAssessmentSettingsBtn"),
+  eicAssessmentSettingsStatus: document.getElementById("eicAssessmentSettingsStatus"),
+  eicAssessmentRunSelect: document.getElementById("eicAssessmentRunSelect"),
+  eicAssessmentDecisionFilter: document.getElementById("eicAssessmentDecisionFilter"),
+  eicAssessmentRunSummary: document.getElementById("eicAssessmentRunSummary"),
+  eicAssessmentResultsBody: document.getElementById("eicAssessmentResultsBody"),
+  refreshEicAssessmentRunsBtn: document.getElementById("refreshEicAssessmentRunsBtn"),
+  eicAssessmentRunSelection: document.getElementById("eicAssessmentRunSelection"),
+  executeEicAssessmentRunBtn: document.getElementById("executeEicAssessmentRunBtn"),
 };
 
 els.rejectTab.addEventListener("click", () => activateView("reject"));
 els.screeningTab.addEventListener("click", () => activateView("screening"));
+els.eicAssessmentTab.addEventListener("click", () => activateView("eicAssessment"));
 els.reviewersTab.addEventListener("click", () => activateView("reviewers"));
 els.queuesTab.addEventListener("click", () => activateView("queues"));
 els.monitorTab.addEventListener("click", () => activateView("monitor"));
 const workflowTabs = [
   { view: "reject", tab: els.rejectTab },
   { view: "screening", tab: els.screeningTab },
+  { view: "eicAssessment", tab: els.eicAssessmentTab },
   { view: "reviewers", tab: els.reviewersTab },
   { view: "queues", tab: els.queuesTab },
   { view: "monitor", tab: els.monitorTab },
@@ -165,6 +191,7 @@ els.reviewerMaxManuscripts.addEventListener("input", renderReviewerBatchSummary)
 els.reviewersPerPaper.addEventListener("input", renderReviewerBatchSummary);
 els.reviewerQueue.addEventListener("change", renderReviewerBatchSummary);
 els.screeningScope.addEventListener("change", renderScreeningScope);
+els.eicAssessmentScope.addEventListener("change", renderEicAssessmentScope);
 bindAsyncClick(els.refreshBtn, refresh);
 bindAsyncClick(els.refreshQueuesBtn, () => refreshScholarOneStatus({ force: true }));
 bindAsyncClick(els.dryRunBtn, runDryRun);
@@ -178,16 +205,24 @@ bindAsyncClick(els.saveReviewerSettingsBtn, saveReviewerSettings);
 bindAsyncClick(els.screeningDryRunBtn, runMetadataCollection);
 bindAsyncClick(els.screeningLiveRunBtn, runLiveAssessment);
 bindAsyncClick(els.saveScreeningSettingsBtn, saveScreeningSettings);
+bindAsyncClick(els.eicAssessmentDryRunBtn, runEicAssessmentDryRun);
+bindAsyncClick(els.eicAssessmentLiveRunBtn, runLiveEicAssessment);
+bindAsyncClick(els.saveEicAssessmentSettingsBtn, saveEicAssessmentSettings);
 
 els.monitorRunSelect.addEventListener("change", () => selectMonitorRun().catch(showError));
 els.screeningRunSelect?.addEventListener("change", () => loadScreeningRun().catch(showError));
 els.screeningDecisionFilter?.addEventListener("change", renderScreeningResults);
 if (els.refreshScreeningRunsBtn) bindAsyncClick(els.refreshScreeningRunsBtn, refreshScreeningRuns);
 if (els.executeRunBtn) bindAsyncClick(els.executeRunBtn, executeSelectedRun);
+els.eicAssessmentRunSelect.addEventListener("change", () => loadEicAssessmentRun().catch(showError));
+els.eicAssessmentDecisionFilter.addEventListener("change", renderEicAssessmentResults);
+bindAsyncClick(els.refreshEicAssessmentRunsBtn, refreshEicAssessmentRuns);
+bindAsyncClick(els.executeEicAssessmentRunBtn, executeSelectedEicAssessmentRun);
 
 refresh().catch(showError);
 refreshDoctor().catch(() => undefined);
 refreshScreeningRuns().catch(() => undefined);
+refreshEicAssessmentRuns().catch(() => undefined);
 startRunMonitor();
 refreshJobHistory().catch(() => undefined);
 setInterval(() => {
@@ -393,7 +428,41 @@ async function executeSelectedRun() {
     method: "POST",
     body: JSON.stringify({
       run: filename,
+      ...screeningOptions(),
       screeningApproveWithoutAssign: approveWithoutAssign,
+    }),
+  });
+  setJob(payload.job);
+}
+
+async function executeSelectedEicAssessmentRun() {
+  const run = state.eicAssessmentRun;
+  const filename = els.eicAssessmentRunSelect.value;
+  if (!run || !filename) {
+    showError(new Error("Select a saved EIC assessment run first."));
+    return;
+  }
+
+  const pending = pendingAssessmentRows(run);
+  if (pending.length === 0) {
+    showError(new Error("This run has no decisions left to execute."));
+    return;
+  }
+
+  const approve = pending.filter((row) => row.decision === "APPROVE").length;
+  const reject = pending.filter((row) => row.decision === "REJECT").length;
+  if (!confirmDangerousAction(
+    `Execute ${pending.length} second-assessment decisions?\n\nAPPROVE: ${approve}\nREJECT: ${reject}\n\nEvery paper will first be assigned to the configured EIC and AE. APPROVE stops at Assign Reviewers. REJECT sends the configured decision email.`
+  )) {
+    return;
+  }
+
+  const payload = await api("/api/run/eic-assessment/execute", {
+    method: "POST",
+    body: JSON.stringify({
+      run: filename,
+      ...eicAssessmentOptions(),
+      eicAssessmentLive: true,
     }),
   });
   setJob(payload.job);
@@ -466,6 +535,31 @@ async function refreshScreeningRuns() {
   await loadScreeningRun();
 }
 
+async function refreshEicAssessmentRuns() {
+  const { runs } = await api("/api/eic-assessment/runs");
+  state.eicAssessmentRuns = runs;
+  els.eicAssessmentRunSelect.replaceChildren();
+
+  if (runs.length === 0) {
+    state.eicAssessmentRun = null;
+    els.eicAssessmentRunSummary.textContent = "No saved runs";
+    els.eicAssessmentRunSelection.textContent = "No run selected";
+    els.eicAssessmentResultsBody.replaceChildren();
+    updateActionState();
+    return;
+  }
+
+  for (const run of runs) {
+    const option = document.createElement("option");
+    option.value = run.filename;
+    const when = run.createdAt ? formatReportDate(run.createdAt) : run.runId;
+    option.textContent = `${when} · ${run.manuscriptCount} papers${run.live ? " · live" : ""}`;
+    els.eicAssessmentRunSelect.append(option);
+  }
+
+  await loadEicAssessmentRun();
+}
+
 async function loadScreeningRun() {
   const filename = els.screeningRunSelect?.value;
   if (!filename) return;
@@ -475,41 +569,64 @@ async function loadScreeningRun() {
   renderScreeningResults();
 }
 
-function renderScreeningResults() {
-  const run = state.screeningRun;
-  if (!run || !els.screeningResultsBody) return;
+async function loadEicAssessmentRun() {
+  const filename = els.eicAssessmentRunSelect.value;
+  if (!filename) return;
 
-  const filter = els.screeningDecisionFilter?.value || "";
+  const { run } = await api(`/api/eic-assessment/runs/${encodeURIComponent(filename)}`);
+  state.eicAssessmentRun = run;
+  renderEicAssessmentResults();
+}
+
+function renderScreeningResults() {
+  renderAssessmentResults({
+    run: state.screeningRun,
+    filter: els.screeningDecisionFilter.value,
+    body: els.screeningResultsBody,
+    summary: els.screeningRunSummary,
+    selection: els.screeningRunSelection,
+    executeButton: els.executeRunBtn,
+  });
+}
+
+function renderEicAssessmentResults() {
+  renderAssessmentResults({
+    run: state.eicAssessmentRun,
+    filter: els.eicAssessmentDecisionFilter.value,
+    body: els.eicAssessmentResultsBody,
+    summary: els.eicAssessmentRunSummary,
+    selection: els.eicAssessmentRunSelection,
+    executeButton: els.executeEicAssessmentRunBtn,
+  });
+}
+
+function renderAssessmentResults({ run, filter, body, summary, selection, executeButton }) {
+  if (!run) return;
+
   const rows = run.manuscripts.filter((row) => {
     if (!filter) return true;
     if (filter === "ERROR") return Boolean(row.assessmentError || row.actionError);
     return row.decision === filter;
   });
 
-  const summary = run.summary || {};
-  const pending = run.manuscripts.filter(
-    (row) => row.decision && !row.assessmentError && !row.actionCompleted
-  ).length;
+  const counts = run.summary || {};
+  const pending = pendingAssessmentRows(run).length;
 
-  if (els.screeningRunSelection) {
-    els.screeningRunSelection.textContent = pending
-      ? `${pending} decisions ready to execute`
-      : "Nothing left to execute in this run";
-  }
-  if (els.executeRunBtn) {
-    els.executeRunBtn.disabled = pending === 0 ||
-      Boolean(state.currentJob && ["running", "stopping"].includes(state.currentJob.status));
-  }
+  selection.textContent = pending
+    ? `${pending} decisions ready to execute`
+    : "Nothing left to execute in this run";
+  executeButton.disabled = pending === 0 ||
+    Boolean(state.currentJob && ["running", "stopping"].includes(state.currentJob.status));
 
-  els.screeningRunSummary.textContent = [
+  summary.textContent = [
     `${run.manuscripts.length} papers`,
-    summary.approved !== undefined ? `APPROVE ${summary.approved}` : null,
-    summary.rejected !== undefined ? `REJECT ${summary.rejected}` : null,
-    summary.assessmentErrors ? `errors ${summary.assessmentErrors}` : null,
+    counts.approved !== undefined ? `APPROVE ${counts.approved}` : null,
+    counts.rejected !== undefined ? `REJECT ${counts.rejected}` : null,
+    counts.assessmentErrors ? `errors ${counts.assessmentErrors}` : null,
     run.live ? "live" : "dry run",
   ].filter(Boolean).join(" · ");
 
-  els.screeningResultsBody.replaceChildren();
+  body.replaceChildren();
 
   if (rows.length === 0) {
     const empty = document.createElement("tr");
@@ -517,13 +634,19 @@ function renderScreeningResults() {
     cell.colSpan = 5;
     cell.textContent = "No results for this filter.";
     empty.append(cell);
-    els.screeningResultsBody.append(empty);
+    body.append(empty);
     return;
   }
 
   for (const row of rows) {
-    els.screeningResultsBody.append(screeningRow(row));
+    body.append(screeningRow(row));
   }
+}
+
+function pendingAssessmentRows(run) {
+  return run.manuscripts.filter(
+    (row) => row.decision && !row.assessmentError && !row.actionCompleted
+  );
 }
 
 function screeningRow(row) {
@@ -694,6 +817,38 @@ async function runLiveAssessment() {
   setJob(payload.job);
 }
 
+async function runEicAssessmentDryRun() {
+  if (!validateInputs(eicAssessmentInputs())) return;
+
+  const payload = await api("/api/run/eic-assessment/collect", {
+    method: "POST",
+    body: JSON.stringify(eicAssessmentOptions()),
+  });
+  setJob(payload.job);
+}
+
+async function runLiveEicAssessment() {
+  if (!validateInputs(eicAssessmentInputs())) return;
+
+  const scope = els.eicAssessmentScope.value === "all"
+    ? "the entire Awaiting EIC Assignment queue"
+    : `at most ${valueOf(els.eicAssessmentMaxChecked)} manuscripts`;
+  if (!confirmDangerousAction(
+    `Run the second assessment LIVE over ${scope}?\n\nEvery paper will first be assigned to the configured EIC and AE. APPROVE stops at Assign Reviewers. REJECT submits “Reject - Fatally Flawed” and sends the configured email.`
+  )) {
+    return;
+  }
+
+  const payload = await api("/api/run/eic-assessment/live", {
+    method: "POST",
+    body: JSON.stringify({
+      ...eicAssessmentOptions(),
+      eicAssessmentLive: true,
+    }),
+  });
+  setJob(payload.job);
+}
+
 async function saveSettings() {
   const payload = await api("/api/settings", {
     method: "POST",
@@ -729,6 +884,15 @@ async function saveScreeningSettings() {
   });
   applyConfig(payload.config);
   els.screeningSettingsStatus.textContent = `Saved to ${payload.config.settingsPath}`;
+}
+
+async function saveEicAssessmentSettings() {
+  const payload = await api("/api/settings", {
+    method: "POST",
+    body: JSON.stringify(settingsOptions()),
+  });
+  applyConfig(payload.config);
+  els.eicAssessmentSettingsStatus.textContent = `Saved to ${payload.config.settingsPath}`;
 }
 
 async function stopCurrentJob() {
@@ -1015,6 +1179,8 @@ function updateActionState() {
   els.inviteReviewersBtn.disabled = jobRunning;
   els.screeningDryRunBtn.disabled = jobRunning;
   els.screeningLiveRunBtn.disabled = jobRunning;
+  els.eicAssessmentDryRunBtn.disabled = jobRunning;
+  els.eicAssessmentLiveRunBtn.disabled = jobRunning;
   if (els.executeRunBtn) {
     const run = state.screeningRun;
     const pending = run
@@ -1022,6 +1188,10 @@ function updateActionState() {
       : 0;
     els.executeRunBtn.disabled = jobRunning || pending === 0;
   }
+  const eicPending = state.eicAssessmentRun
+    ? pendingAssessmentRows(state.eicAssessmentRun).length
+    : 0;
+  els.executeEicAssessmentRunBtn.disabled = jobRunning || eicPending === 0;
 }
 
 function activateView(view) {
@@ -1029,6 +1199,7 @@ function activateView(view) {
   const views = [
     { name: "reject", tab: els.rejectTab, panel: els.rejectPanel },
     { name: "screening", tab: els.screeningTab, panel: els.screeningPanel },
+    { name: "eicAssessment", tab: els.eicAssessmentTab, panel: els.eicAssessmentPanel },
     { name: "reviewers", tab: els.reviewersTab, panel: els.reviewersPanel },
     { name: "queues", tab: els.queuesTab, panel: els.queuesPanel },
     { name: "monitor", tab: els.monitorTab, panel: els.monitorPanel },
@@ -1105,7 +1276,17 @@ function applyConfig(config) {
   setValue(els.assessmentPrompt, config.assessmentPrompt);
   setValue(els.screeningRejectMessage, config.screeningRejectMessage);
   els.screeningApproveWithoutAssign.checked = Boolean(config.screeningApproveWithoutAssign);
+  setValue(els.eicAssessmentStartUrl, config.eicAssessmentStartUrl);
+  setValue(els.eicAssessmentScope, config.eicAssessmentScanAll ? "all" : "limited");
+  setValue(els.eicAssessmentMaxChecked, config.eicAssessmentMaxChecked);
+  setValue(els.eicAssessmentSlowMo, config.eicAssessmentSlowMo);
+  setValue(els.eicAssessmentModel, config.eicAssessmentModel);
+  setValue(els.eicAssessmentReasoningEffort, config.eicAssessmentReasoningEffort);
+  setValue(els.eicAssessmentTimeoutSeconds, config.eicAssessmentTimeoutSeconds);
+  setValue(els.eicAssessmentPrompt, config.eicAssessmentPrompt);
+  setValue(els.eicAssessmentRejectMessage, config.eicAssessmentRejectMessage);
   renderScreeningScope();
+  renderEicAssessmentScope();
   renderReviewerBatchSummary();
   const settingsStatus = config.settingsSaved
     ? `Saved: ${config.settingsPath}`
@@ -1113,6 +1294,7 @@ function applyConfig(config) {
   els.settingsStatus.textContent = settingsStatus;
   els.reviewerSettingsStatus.textContent = settingsStatus;
   els.screeningSettingsStatus.textContent = settingsStatus;
+  els.eicAssessmentSettingsStatus.textContent = settingsStatus;
 }
 
 function setValue(input, value) {
@@ -1139,6 +1321,7 @@ function settingsOptions() {
     ...formOptions(),
     ...reviewerOptions(),
     ...screeningOptions(),
+    ...eicAssessmentOptions(),
   };
 }
 
@@ -1174,6 +1357,37 @@ function screeningOptions() {
   };
 }
 
+function eicAssessmentInputs() {
+  const inputs = [
+    els.eicAssessmentStartUrl,
+    els.eicAssessmentSlowMo,
+    els.eicAssessmentModel,
+    els.eicAssessmentReasoningEffort,
+    els.eicAssessmentTimeoutSeconds,
+    els.eicAssessmentPrompt,
+    els.eicAssessmentRejectMessage,
+  ];
+  if (els.eicAssessmentScope.value === "limited") {
+    inputs.push(els.eicAssessmentMaxChecked);
+  }
+  return inputs;
+}
+
+function eicAssessmentOptions() {
+  return {
+    eicAssessmentStartUrl: valueOf(els.eicAssessmentStartUrl),
+    eicAssessmentMaxChecked: valueOf(els.eicAssessmentMaxChecked),
+    eicAssessmentScanAll: els.eicAssessmentScope.value === "all",
+    eicAssessmentSlowMo: valueOf(els.eicAssessmentSlowMo),
+    eicAssessmentKeepOpen: false,
+    eicAssessmentModel: valueOf(els.eicAssessmentModel),
+    eicAssessmentReasoningEffort: els.eicAssessmentReasoningEffort.value,
+    eicAssessmentTimeoutSeconds: valueOf(els.eicAssessmentTimeoutSeconds),
+    eicAssessmentPrompt: valueOf(els.eicAssessmentPrompt),
+    eicAssessmentRejectMessage: valueOf(els.eicAssessmentRejectMessage),
+  };
+}
+
 function renderScreeningScope() {
   const scanAll = els.screeningScope.value === "all";
   els.screeningMaxChecked.disabled = scanAll;
@@ -1186,6 +1400,20 @@ function renderScreeningScope() {
   els.screeningMaxChecked.title = scanAll
     ? "Limit jest wyłączony podczas skanowania całej kolejki."
     : "Maksymalna liczba manuskryptów sprawdzonych w tym przebiegu.";
+}
+
+function renderEicAssessmentScope() {
+  const scanAll = els.eicAssessmentScope.value === "all";
+  els.eicAssessmentMaxChecked.disabled = scanAll;
+  els.eicAssessmentDryRunBtn.textContent = scanAll
+    ? "Dry run entire queue"
+    : "Dry run limited batch";
+  els.eicAssessmentLiveRunBtn.textContent = scanAll
+    ? "Live entire queue"
+    : "Live limited batch";
+  els.eicAssessmentMaxChecked.title = scanAll
+    ? "Limit is disabled while scanning the entire queue."
+    : "Maximum manuscripts checked in this run.";
 }
 
 function reviewerInputs() {

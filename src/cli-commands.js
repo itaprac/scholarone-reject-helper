@@ -45,6 +45,33 @@ export function translateScreenArgs(rest) {
   return [...args, ...passThrough(rest, ["dry-run", "live"])];
 }
 
+export function translateEicScreenArgs(rest) {
+  const fromRun = valueOf(rest, "from-run");
+  if (fromRun) {
+    return [
+      "--headed",
+      "--assessment-stage=eic",
+      `--from-run=${fromRun}`,
+      ...passThrough(rest, ["dry-run", "live", "from-run"]),
+    ];
+  }
+
+  const args = [
+    "--headed",
+    "--assessment-stage=eic",
+    "--collect-metadata",
+    "--assess-with-llm",
+  ];
+
+  if (rest.includes("--live")) {
+    args.push("--apply-assessment-decisions");
+  } else {
+    args.push("--scan-all-metadata");
+  }
+
+  return [...args, ...passThrough(rest, ["dry-run", "live"])];
+}
+
 export function translateReviewerArgs(rest) {
   const args = ["--select-reviewers", "--headed"];
 

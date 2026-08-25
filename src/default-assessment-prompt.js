@@ -93,3 +93,8 @@ Zwróć APPROVE tylko przy pełnym wyniku 10/10. Wynik 9/10 lub niższy zawsze o
 W wymiarze walidacji przyznaj 2 punkty za konkretne dane, eksperyment, porównanie lub formalną analizę wraz z wynikami; 1 punkt, gdy sposób walidacji i kierunek wyników są opisane, ale brakuje wartości liczbowych albo pełnego porównania; 0 punktów, gdy są tylko oczekiwane korzyści lub deklaracja skuteczności bez opisu sprawdzenia. W wymiarze wkładu przyznaj 2 punkty za jasno odróżnioną nowość; 1 punkt za wiarygodne rozwinięcie lub zastosowanie istniejących metod; 0 punktów, gdy wkład jest nieokreślony.
 
 Nie uzupełniaj brakujących informacji własnymi założeniami i nie karz wyłącznie za niedoskonały język angielski. W reason rozpocznij od „SCORE: X/10” i podaj jeden najważniejszy argument za decyzją.`;
+
+// Druga opinia jest celowo bardziej rygorystyczna niż Initial assessment.
+// Osobny eksport daje UI niezależną wartość domyślną i pozwala zmieniać jeden
+// prompt bez wpływu na cache ani ustawienia drugiego etapu.
+export const DEFAULT_EIC_ASSESSMENT_PROMPT = SCORE_10_ASSESSMENT_PROMPT;

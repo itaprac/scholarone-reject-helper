@@ -4,6 +4,7 @@ import path from "node:path";
 import { collectArtifactRows } from "./report.js";
 import { rowsToCsv } from "./csv.js";
 import { screeningResultToCsv } from "../screening-report.js";
+import { assessmentArtifactDirectory } from "../assessment-stage.js";
 
 export async function writeRunArtifacts(result, { config, runId, reportDir }) {
   const jsonPath = path.join(reportDir, `${runId}.json`);
@@ -27,7 +28,7 @@ export async function writeRunArtifacts(result, { config, runId, reportDir }) {
 }
 
 export async function writeMetadataArtifact(result, { config, runId }) {
-  const screeningDir = path.join(config.logsDir, "screening");
+  const screeningDir = assessmentArtifactDirectory(config);
   const artifactPath = path.join(screeningDir, `${runId}.json`);
   const summaryCsvPath = path.join(screeningDir, `${runId}-summary.csv`);
   await fsp.mkdir(screeningDir, { recursive: true });
@@ -51,6 +52,8 @@ export async function writeMetadataArtifact(result, { config, runId }) {
       assessmentTimeoutSeconds: config.assessmentTimeoutSeconds,
       assessmentPromptLength: config.assessmentPrompt.length,
       applyAssessmentDecisions: config.applyAssessmentDecisions,
+      assessmentStage: config.assessmentStage,
+      assessmentQueueLabel: config.assessmentQueueLabel,
       approveWithoutAssign: config.approveWithoutAssign,
       screeningEditorName: config.screeningEditorName,
       screeningRejectMessageLength: config.screeningRejectMessage.length,

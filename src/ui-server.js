@@ -5,7 +5,13 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_REJECT_MESSAGE } from "./default-message.js";
-import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "./job-args.js";
+import {
+  buildEicAssessmentJobArgs,
+  buildAssessmentFromRunArgs,
+  buildJobArgs,
+  buildReviewerJobArgs,
+  buildScreeningJobArgs,
+} from "./job-args.js";
 import { validateRunOptions } from "./run-options.js";
 import { buildPublicConfig, normalizeUiSettings } from "./config/ui-settings.js";
 import { describeFields } from "./config/options.js";
@@ -57,6 +63,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, {
         reject: describeFields("live"),
         screening: describeFields("screening"),
+        eicAssessment: describeFields("eic-assessment"),
         reviewers: describeFields("reviewers-invite"),
       });
     }
@@ -68,6 +75,22 @@ const server = http.createServer(async (req, res) => {
     const screeningMatch = url.pathname.match(/^\/api\/screening\/runs\/([^/]+)$/);
     if (screeningMatch && req.method === "GET") {
       const run = await readScreeningRun(path.join(projectRoot, "logs"), decodeURIComponent(screeningMatch[1]));
+      return sendJson(res, { run });
+    }
+
+    if (url.pathname === "/api/eic-assessment/runs" && req.method === "GET") {
+      return sendJson(res, {
+        runs: await listScreeningRuns(path.join(projectRoot, "logs"), { stage: "eic" }),
+      });
+    }
+
+    const eicAssessmentMatch = url.pathname.match(/^\/api\/eic-assessment\/runs\/([^/]+)$/);
+    if (eicAssessmentMatch && req.method === "GET") {
+      const run = await readScreeningRun(
+        path.join(projectRoot, "logs"),
+        decodeURIComponent(eicAssessmentMatch[1]),
+        { stage: "eic" }
+      );
       return sendJson(res, { run });
     }
 
@@ -161,11 +184,39 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/api/run/screening/execute" && req.method === "POST") {
       const body = await readJsonBody(req);
       const runPath = resolveScreeningRunPath(body.run);
-      const args = ["--headed", `--from-run=${relativeProjectPath(runPath)}`];
-      if (body.screeningApproveWithoutAssign) {
-        args.push("--approve-without-assign");
-      }
+      body.screeningLive = true;
+      validateRunOptions(body, "screening");
+      const args = buildAssessmentFromRunArgs(body, {
+        run: relativeProjectPath(runPath),
+      });
       return sendJson(res, { job: startJob("initial-assessment-from-run", args) });
+    }
+
+    if (url.pathname === "/api/run/eic-assessment/collect" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      validateRunOptions(body, "eic-assessment");
+      const args = buildEicAssessmentJobArgs(body);
+      return sendJson(res, { job: startJob("eic-assessment-dryrun", args) });
+    }
+
+    if (url.pathname === "/api/run/eic-assessment/live" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      body.eicAssessmentLive = true;
+      validateRunOptions(body, "eic-assessment");
+      const args = buildEicAssessmentJobArgs(body, { applyDecisions: true });
+      return sendJson(res, { job: startJob("eic-assessment-live", args) });
+    }
+
+    if (url.pathname === "/api/run/eic-assessment/execute" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      const runPath = resolveAssessmentRunPath(body.run, "eic");
+      body.eicAssessmentLive = true;
+      validateRunOptions(body, "eic-assessment");
+      const args = buildAssessmentFromRunArgs(body, {
+        run: relativeProjectPath(runPath),
+        stage: "eic",
+      });
+      return sendJson(res, { job: startJob("eic-assessment-from-run", args) });
     }
 
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
@@ -400,7 +451,8 @@ function runLogMode(filename, first) {
   if (/^select-reviewers-/i.test(filename)) return "reviewers";
   if (!first || first.type !== "run_started") return null;
   if (first.collectMetadata) {
-    return first.applyAssessmentDecisions ? "screening-live" : "screening-dryrun";
+    const prefix = first.assessmentStage === "eic" ? "eic-assessment" : "screening";
+    return first.applyAssessmentDecisions ? `${prefix}-live` : `${prefix}-dryrun`;
   }
   if (first.rejectFromReport || first.rejectIdsCount) return "reject-from-report";
   if (first.reportOnly) return "reject-dryrun";
@@ -800,14 +852,19 @@ function resolveReportPath(value) {
 // Ścieżka musi wskazywać plik wyniku w logs/screening — bez tego panel mógłby
 // kazać wykonać dowolny plik z dysku.
 function resolveScreeningRunPath(value) {
+  return resolveAssessmentRunPath(value, "initial");
+}
+
+function resolveAssessmentRunPath(value, stage) {
   if (!value) throw badRequest("Wybierz zapisany przebieg oceny.");
 
-  const screeningDir = path.join(projectRoot, "logs", "screening");
+  const directoryName = stage === "eic" ? "eic-assessment" : "screening";
+  const screeningDir = path.join(projectRoot, "logs", directoryName);
   const absolutePath = path.resolve(screeningDir, path.basename(String(value)));
   const relative = path.relative(screeningDir, absolutePath);
 
   if (relative.startsWith("..") || path.isAbsolute(relative) || !/\.json$/i.test(absolutePath)) {
-    throw badRequest("Przebieg musi byc plikiem JSON z logs/screening.");
+    throw badRequest(`Przebieg musi byc plikiem JSON z logs/${directoryName}.`);
   }
   if (!fs.existsSync(absolutePath)) {
     throw badRequest("Nie znaleziono wskazanego przebiegu oceny.");

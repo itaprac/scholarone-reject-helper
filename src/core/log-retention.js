@@ -42,6 +42,7 @@ export async function pruneLogs({
   }
   if (includeScreening) {
     targets.push(...(await collectDated(path.join(logsDir, "screening"), keepRuns, cutoff)));
+    targets.push(...(await collectDated(path.join(logsDir, "eic-assessment"), keepRuns, cutoff)));
   }
 
   let freedBytes = 0;

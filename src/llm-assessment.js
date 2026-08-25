@@ -53,7 +53,23 @@ export function parseAssessmentOutput(value) {
   return { decision, reason };
 }
 
-export function deriveSimulatedContinuation(decision) {
+export function deriveSimulatedContinuation(decision, { assessmentStage = "initial" } = {}) {
+  if (assessmentStage === "eic") {
+    if (decision === "APPROVE") {
+      return {
+        allowed: true,
+        action: "WOULD_CONTINUE",
+        note: "Symulacja: workflow przypisałby EIC i AE, a następnie zatrzymał artykuł w Assign Reviewers.",
+      };
+    }
+    if (decision === "REJECT") {
+      return {
+        allowed: false,
+        action: "WOULD_STOP",
+        note: "Symulacja: workflow przypisałby EIC i AE, a następnie wysłał decyzję Reject - Fatally Flawed.",
+      };
+    }
+  }
   if (decision === "APPROVE") {
     return {
       allowed: true,

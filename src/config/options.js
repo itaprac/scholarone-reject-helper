@@ -137,6 +137,46 @@ export const FIELDS = Object.freeze({
   screeningKeepOpen: {
     flag: "keep-open", type: "bool", default: false, label: "Keep browser open",
   },
+
+  eicAssessmentStartUrl: {
+    flag: "start-url", env: "START_URL", type: "url",
+    default: UI_DEFAULTS.startUrl, label: "Start URL",
+  },
+  eicAssessmentMaxChecked: {
+    flag: "max-checked", type: "int", min: 1,
+    default: String(UI_DEFAULTS.eicAssessmentMaxChecked), label: "Max checked",
+  },
+  eicAssessmentSlowMo: {
+    flag: "slow-mo", env: "SLOW_MO", type: "int", min: 0,
+    default: String(UI_DEFAULTS.slowMo), label: "Slow motion (ms)",
+  },
+  eicAssessmentModel: {
+    flag: "assessment-model", env: "ASSESSMENT_MODEL", type: "text",
+    default: UI_DEFAULTS.assessmentModel, label: "Model",
+  },
+  eicAssessmentReasoningEffort: {
+    flag: "assessment-reasoning-effort", env: "ASSESSMENT_REASONING_EFFORT",
+    type: "choice", choices: ASSESSMENT_REASONING_EFFORTS,
+    default: DEFAULT_ASSESSMENT_REASONING_EFFORT, label: "Reasoning effort",
+  },
+  eicAssessmentTimeoutSeconds: {
+    flag: "assessment-timeout-seconds", env: "ASSESSMENT_TIMEOUT_SECONDS", type: "int", min: 10,
+    default: String(UI_DEFAULTS.assessmentTimeoutSeconds), label: "Timeout (s)",
+  },
+  eicAssessmentPrompt: {
+    flag: "assessment-prompt", type: "text",
+    required: true, label: "Second assessment prompt", multiline: true,
+  },
+  eicAssessmentRejectMessage: {
+    flag: "screening-reject-message", type: "text",
+    label: "Second assessment rejection email", multiline: true,
+  },
+  eicAssessmentScanAll: {
+    flag: "scan-all-metadata", type: "bool", default: true, label: "Entire queue",
+  },
+  eicAssessmentKeepOpen: {
+    flag: "keep-open", type: "bool", default: false, label: "Keep browser open",
+  },
 });
 
 // Kolejność pól wyznacza kolejność argumentów CLI. Testy przybijają ją wprost,
@@ -193,6 +233,16 @@ export const RUN_MODES = Object.freeze({
       "assessmentPrompt",
     ],
     trailing: ["screeningKeepOpen"],
+  },
+  "eic-assessment": {
+    entry: "reject",
+    flags: ["--headed", "--assessment-stage=eic", "--collect-metadata", "--assess-with-llm"],
+    fields: [
+      "eicAssessmentStartUrl", "eicAssessmentMaxChecked", "eicAssessmentSlowMo",
+      "eicAssessmentModel", "eicAssessmentReasoningEffort", "eicAssessmentTimeoutSeconds",
+      "eicAssessmentPrompt",
+    ],
+    trailing: ["eicAssessmentKeepOpen"],
   },
 });
 

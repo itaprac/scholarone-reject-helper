@@ -65,6 +65,7 @@ test("keeps every eligible manuscript and assessment in one batch result", () =>
     liveApproved: 0,
     liveRejected: 0,
     liveApprovedAwaitingAssignment: 0,
+    liveAdvancedToReviewers: 0,
     actionErrors: 0,
     totalAssessmentDurationMs: 3000,
     tokenUsage: {
@@ -178,4 +179,33 @@ test("counts approvals left awaiting manual editor assignment", () => {
   assert.equal(result.summary.liveApproved, 2);
   assert.equal(result.summary.liveApprovedAwaitingAssignment, 1);
   assert.match(result.note, /1 zatwierdzonych czeka w Awaiting EIC Assignment/);
+});
+
+test("reports EIC assessment papers advanced to Assign Reviewers", () => {
+  const result = buildScreeningBatchResult({
+    checked: 2,
+    skippedUnusualActivity: [],
+    manuscripts: [
+      {
+        assessment: { decision: "APPROVE" },
+        decisionAction: { completed: true, decision: "APPROVE", advancedToReviewers: true },
+      },
+      {
+        assessment: { decision: "REJECT" },
+        decisionAction: { completed: true, decision: "REJECT", advancedToReviewers: false },
+      },
+    ],
+    assessWithLlm: true,
+    applyAssessmentDecisions: true,
+    scanAll: true,
+    maxChecked: 10,
+    queueExhausted: true,
+    queueLabel: "Awaiting EIC Assignment",
+    assessmentStage: "eic",
+  });
+
+  assert.equal(result.assessmentStage, "eic");
+  assert.equal(result.queueLabel, "Awaiting EIC Assignment");
+  assert.equal(result.summary.liveAdvancedToReviewers, 1);
+  assert.match(result.note, /1 artykuł doprowadzono do etapu Assign Reviewers/);
 });

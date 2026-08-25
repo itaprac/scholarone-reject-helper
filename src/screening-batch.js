@@ -7,6 +7,8 @@ export function buildScreeningBatchResult({
   scanAll,
   maxChecked,
   queueExhausted,
+  queueLabel = "Complete Checklist",
+  assessmentStage = "initial",
 }) {
   const approved = manuscripts.filter((entry) => entry.assessment?.decision === "APPROVE").length;
   const rejected = manuscripts.filter((entry) => entry.assessment?.decision === "REJECT").length;
@@ -20,6 +22,9 @@ export function buildScreeningBatchResult({
   ).length;
   const liveApprovedAwaitingAssignment = manuscripts.filter(
     (entry) => entry.decisionAction?.completed && entry.decisionAction?.awaitingEditorAssignment
+  ).length;
+  const liveAdvancedToReviewers = manuscripts.filter(
+    (entry) => entry.decisionAction?.completed && entry.decisionAction?.advancedToReviewers
   ).length;
   const automaticallyApprovedRevisions = manuscripts.filter(
     (entry) => entry.assessment?.mode === "automatic-revision" && entry.assessment?.decision === "APPROVE"
@@ -63,13 +68,20 @@ export function buildScreeningBatchResult({
   const scopeNote = actionErrors > 0
     ? "Zatrzymano kolejkę po pierwszym niepotwierdzonym kroku live."
     : queueExhausted
-      ? "Przejrzano całą dostępną kolejkę Complete Checklist."
+      ? `Przejrzano całą dostępną kolejkę ${queueLabel}.`
       : limitReached
         ? `Zatrzymano po osiągnięciu limitu ${maxChecked} sprawdzonych manuskryptów.`
         : "Zakończono zbieranie dostępnych manuskryptów.";
+  const advancedToReviewersNote = liveAdvancedToReviewers === 1
+    ? " 1 artykuł doprowadzono do etapu Assign Reviewers."
+    : liveAdvancedToReviewers > 1
+      ? ` ${liveAdvancedToReviewers} artykułów doprowadzono do etapu Assign Reviewers.`
+      : "";
 
   return {
     status,
+    assessmentStage,
+    queueLabel,
     checked,
     eligibleCount: manuscripts.length,
     skippedUnusualActivity,
@@ -85,6 +97,7 @@ export function buildScreeningBatchResult({
       liveApproved,
       liveRejected,
       liveApprovedAwaitingAssignment,
+      liveAdvancedToReviewers,
       actionErrors,
       totalAssessmentDurationMs,
       tokenUsage,
@@ -96,10 +109,10 @@ export function buildScreeningBatchResult({
         liveApprovedAwaitingAssignment > 0
           ? ` ${liveApprovedAwaitingAssignment} zatwierdzonych czeka w Awaiting EIC Assignment na ręczne dobranie edytorów.`
           : ""
-      }`
+      }${advancedToReviewersNote}`
       : assessWithLlm
-      ? `${scopeNote} Oceny LLM są wstępne i informacyjne; nie kliknięto Complete Checklist ani żadnej decyzji.`
-      : `${scopeNote} Nie kliknięto Complete Checklist ani żadnej decyzji.`,
+      ? `${scopeNote} Oceny LLM są informacyjne; nie wykonano żadnej decyzji ani przypisania.`
+      : `${scopeNote} Nie wykonano żadnej decyzji ani przypisania.`,
   };
 }
 

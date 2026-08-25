@@ -2,6 +2,7 @@ import path from "node:path";
 import { runCodexAssessment } from "../llm-assessment.js";
 import { projectRoot } from "../config/defaults.js";
 import { createAssessmentCache } from "./cache.js";
+import { assessmentArtifactDirectory } from "../assessment-stage.js";
 
 // Warstwa pośrednia między workflow a modelem.
 //
@@ -28,7 +29,7 @@ export function createAssessmentProvider(config, { runId, log = async () => unde
     name: "codex-cli",
 
     outputPathFor(manuscriptId) {
-      return path.join(config.logsDir, "screening", `${runId}-${manuscriptId}-llm.json`);
+      return path.join(assessmentArtifactDirectory(config), `${runId}-${manuscriptId}-llm.json`);
     },
 
     async assess(metadata) {

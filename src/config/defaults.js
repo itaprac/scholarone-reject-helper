@@ -31,6 +31,7 @@ export const DEFAULTS = Object.freeze({
 
   // Wstępna ocena LLM.
   screeningMaxChecked: 100,
+  eicAssessmentMaxChecked: 100,
   assessmentModel: DEFAULT_ASSESSMENT_MODEL,
   assessmentReasoningEffort: DEFAULT_ASSESSMENT_REASONING_EFFORT,
   assessmentTimeoutSeconds: 120,

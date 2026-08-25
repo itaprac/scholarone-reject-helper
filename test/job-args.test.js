@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildJobArgs, buildReviewerJobArgs, buildScreeningJobArgs } from "../src/job-args.js";
+import {
+  buildAssessmentFromRunArgs,
+  buildEicAssessmentJobArgs,
+  buildJobArgs,
+  buildReviewerJobArgs,
+  buildScreeningJobArgs,
+} from "../src/job-args.js";
 
 const OPTIONS = {
   startUrl: "https://mc.manuscriptcentral.com/kes",
@@ -207,4 +213,67 @@ test("a live assessment run can leave approvals awaiting editor assignment", () 
 
   // Dry run nie wykonuje decyzji, więc flaga nie ma prawa do niego trafić.
   assert.ok(!buildScreeningJobArgs(body).includes("--approve-without-assign"));
+});
+
+test("builds the separate EIC assessment dry run", () => {
+  assert.deepEqual(buildEicAssessmentJobArgs({
+    eicAssessmentStartUrl: "https://mc.manuscriptcentral.com/kes",
+    eicAssessmentMaxChecked: "20",
+    eicAssessmentSlowMo: "300",
+    eicAssessmentScanAll: true,
+    eicAssessmentKeepOpen: false,
+    eicAssessmentModel: "gpt-test",
+    eicAssessmentReasoningEffort: "high",
+    eicAssessmentTimeoutSeconds: "180",
+    eicAssessmentPrompt: "Strict prompt",
+  }), [
+    "--headed",
+    "--assessment-stage=eic",
+    "--collect-metadata",
+    "--assess-with-llm",
+    "--scan-all-metadata",
+    "--start-url=https://mc.manuscriptcentral.com/kes",
+    "--max-checked=20",
+    "--slow-mo=300",
+    "--assessment-model=gpt-test",
+    "--assessment-reasoning-effort=high",
+    "--assessment-timeout-seconds=180",
+    "--assessment-prompt=Strict prompt",
+  ]);
+});
+
+test("live EIC assessment includes its own rejection message", () => {
+  const args = buildEicAssessmentJobArgs({
+    eicAssessmentMaxChecked: "2",
+    eicAssessmentModel: "gpt-test",
+    eicAssessmentReasoningEffort: "medium",
+    eicAssessmentTimeoutSeconds: "120",
+    eicAssessmentPrompt: "Strict prompt",
+    eicAssessmentRejectMessage: "Second-stage reject body",
+  }, { applyDecisions: true });
+
+  assert.ok(args.includes("--assessment-stage=eic"));
+  assert.ok(args.includes("--apply-assessment-decisions"));
+  assert.ok(args.includes("--screening-reject-message=Second-stage reject body"));
+  assert.equal(args.includes("--approve-without-assign"), false);
+});
+
+test("executes a saved EIC run with the UI rejection message", () => {
+  assert.deepEqual(buildAssessmentFromRunArgs({
+    eicAssessmentStartUrl: "https://mc.manuscriptcentral.com/kes",
+    eicAssessmentSlowMo: "250",
+    eicAssessmentRejectMessage: "Reviewed second-stage message",
+    eicAssessmentKeepOpen: true,
+  }, {
+    run: "logs/eic-assessment/run.json",
+    stage: "eic",
+  }), [
+    "--headed",
+    "--assessment-stage=eic",
+    "--from-run=logs/eic-assessment/run.json",
+    "--start-url=https://mc.manuscriptcentral.com/kes",
+    "--slow-mo=250",
+    "--screening-reject-message=Reviewed second-stage message",
+    "--keep-open",
+  ]);
 });

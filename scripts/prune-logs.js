@@ -17,7 +17,7 @@ if (args.help) {
   --keep-screenshots=N ile ostatnich katalogów ze zrzutami zostawić (domyślnie ${RETENTION_DEFAULTS.keepScreenshotRuns})
   --max-age-days=N     jak długo żyje ogon poza tą podłogą (domyślnie ${RETENTION_DEFAULTS.maxAgeDays}, 0 wyłącza)
   --include-reports    czyść także logs/reports (uwaga: reject-from-report ich potrzebuje)
-  --include-screening  czyść także logs/screening
+  --include-screening  czyść także logs/screening i logs/eic-assessment
   --dry-run            pokaż, co zniknie, bez kasowania`);
   process.exit(0);
 }

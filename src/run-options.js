@@ -22,18 +22,30 @@ export function validateRunOptions(body, mode) {
     }
   }
 
-  if (mode === "screening") {
-    if (!String(body.assessmentPrompt || "").trim()) {
+  if (mode === "screening" || mode === "eic-assessment") {
+    const eic = mode === "eic-assessment";
+    const prompt = eic ? body.eicAssessmentPrompt : body.assessmentPrompt;
+    const reasoning = eic ? body.eicAssessmentReasoningEffort : body.assessmentReasoningEffort;
+    const rejectMessage = eic ? body.eicAssessmentRejectMessage : body.screeningRejectMessage;
+    if (!String(prompt || "").trim()) {
       throw badRequest("Prompt oceny LLM nie może być pusty.");
     }
     validateChoice(
-      body.assessmentReasoningEffort || field("assessmentReasoningEffort").default,
-      { key: "assessmentReasoningEffort", ...field("assessmentReasoningEffort") }
+      reasoning || assessmentReasoningField(eic).default,
+      { key: assessmentReasoningKey(eic), ...assessmentReasoningField(eic) }
     );
-    if (body.screeningLive && !String(body.screeningRejectMessage || "").trim()) {
+    if ((body.screeningLive || body.eicAssessmentLive) && !String(rejectMessage || "").trim()) {
       throw badRequest("Wiadomość Reject nie może być pusta w trybie live.");
     }
   }
+}
+
+function assessmentReasoningKey(eic) {
+  return eic ? "eicAssessmentReasoningEffort" : "assessmentReasoningEffort";
+}
+
+function assessmentReasoningField(eic) {
+  return field(assessmentReasoningKey(eic));
 }
 
 function validateField(value, descriptor) {

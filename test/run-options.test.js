@@ -132,6 +132,29 @@ test("validates Codex-backed initial assessment options", () => {
   }, "screening"), /Wiadomość Reject/);
 });
 
+test("validates the separate EIC assessment options", () => {
+  assert.doesNotThrow(() => validateRunOptions({
+    eicAssessmentStartUrl: "https://mc.manuscriptcentral.com/kes",
+    eicAssessmentMaxChecked: "20",
+    eicAssessmentSlowMo: "0",
+    eicAssessmentTimeoutSeconds: "120",
+    eicAssessmentReasoningEffort: "high",
+    eicAssessmentPrompt: "Strict second-stage prompt",
+  }, "eic-assessment"));
+
+  assertBadRequest(() => validateRunOptions({
+    eicAssessmentReasoningEffort: "medium",
+    eicAssessmentPrompt: " ",
+  }, "eic-assessment"), /Prompt oceny LLM/);
+
+  assertBadRequest(() => validateRunOptions({
+    eicAssessmentReasoningEffort: "medium",
+    eicAssessmentPrompt: "Strict prompt",
+    eicAssessmentLive: true,
+    eicAssessmentRejectMessage: " ",
+  }, "eic-assessment"), /Wiadomość Reject/);
+});
+
 function assertBadRequest(callback, messagePattern) {
   assert.throws(callback, (error) => {
     assert.equal(error.statusCode, 400);

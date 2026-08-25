@@ -15,17 +15,17 @@ import { resolveProjectPath } from "../core/env.js";
 import {
   loadScreeningProgress,
   markScreeningProgress,
-  screeningProgressPath,
   screeningResumeDecision,
 } from "../screening-progress.js";
 import {
   inspectCurrentManuscript,
-  navigateToCompleteChecklistQueue,
-  openViewDetailsByIndex,
+  navigateToAdminQueue,
+  openViewDetailsByManuscriptIdAcrossQueuePages,
   waitForDetailsPageOrRelogin,
 } from "../steps/queue.js";
 import { applyLiveAssessmentDecision, screeningActionName } from "./screening.js";
 import { context } from "./context.js";
+import { assessmentProgressPath, assessmentWorkflowName } from "../assessment-stage.js";
 
 export async function runScreeningFromRun(page) {
   const source = context.config.screeningFromRun;
@@ -33,7 +33,7 @@ export async function runScreeningFromRun(page) {
     throw new Error("Ten tryb wymaga --from-run=logs/screening/PLIK.json");
   }
 
-  const decisions = await loadDecisions(source);
+  const decisions = await loadDecisions(source, context.config.assessmentStage);
   if (decisions.length === 0) {
     return {
       status: "screening_run_has_no_decisions",
@@ -45,7 +45,7 @@ export async function runScreeningFromRun(page) {
   }
 
   const actionLog = createActionLog(context.config.logsDir);
-  const progressPath = screeningProgressPath(context.config.logsDir);
+  const progressPath = assessmentProgressPath(context.config);
   const progress = await loadScreeningProgress(progressPath);
   const liveGuard = createLiveGuard({ limit: context.config.maxLiveActions });
 
@@ -60,7 +60,7 @@ export async function runScreeningFromRun(page) {
   let performed = 0;
   let status = "screening_from_run_finished";
 
-  await navigateToCompleteChecklistQueue(page);
+  await navigateToAdminQueue(page, context.config.assessmentQueueLabel);
 
   for (const [index, decision] of decisions.entries()) {
     const position = index + 1;
@@ -89,25 +89,14 @@ export async function runScreeningFromRun(page) {
       break;
     }
 
-    const found = await context.quickSearchManuscript(page, manuscriptId);
-    if (!found?.found) {
+    const opened = await openViewDetailsByManuscriptIdAcrossQueuePages(page, manuscriptId);
+    if (!opened) {
       // Manuskrypt zniknął z kolejki między oceną a wykonaniem — najczęściej
       // dlatego, że ktoś obsłużył go ręcznie. To nie jest błąd przebiegu.
       results.push({ manuscriptId, status: "not_found_in_queue" });
       await context.log("screening_from_run_not_found", { manuscriptId });
       console.log(`[${position}] ${manuscriptId} -> nie ma go już w kolejce, pomijam`);
-      continue;
-    }
-
-    // Wyszukiwarka kończy na liście wyników, a decyzję wykonuje się na stronie
-    // szczegółów — bez tego kroku nie ma zakładki Complete Checklist ani
-    // przycisków akcji. Ta sama sekwencja co w reject-from-report.
-    const opened = await openViewDetailsByIndex(page, 0);
-    if (!opened) {
-      results.push({ manuscriptId, status: "view_details_not_found" });
-      await context.log("screening_from_run_view_details_not_found", { manuscriptId });
-      console.log(`[${position}] ${manuscriptId} -> nie udało się otworzyć szczegółów, pomijam`);
-      await navigateToCompleteChecklistQueue(page);
+      await navigateToAdminQueue(page, context.config.assessmentQueueLabel);
       continue;
     }
 
@@ -115,7 +104,7 @@ export async function runScreeningFromRun(page) {
     if (!detailsReady) {
       results.push({ manuscriptId, status: "login_interrupted_open_details" });
       await context.log("screening_from_run_login_interrupted", { manuscriptId });
-      await navigateToCompleteChecklistQueue(page);
+      await navigateToAdminQueue(page, context.config.assessmentQueueLabel);
       continue;
     }
 
@@ -133,7 +122,7 @@ export async function runScreeningFromRun(page) {
         foundManuscriptId: details.manuscriptId,
       });
       console.error(`[${position}] ${manuscriptId} -> otwarto ${details.manuscriptId || "inny artykuł"}, pomijam`);
-      await navigateToCompleteChecklistQueue(page);
+      await navigateToAdminQueue(page, context.config.assessmentQueueLabel);
       continue;
     }
 
@@ -168,7 +157,7 @@ export async function runScreeningFromRun(page) {
       });
       await actionLog.record({
         runId: context.runId,
-        mode: "screening-from-run",
+        mode: `${assessmentWorkflowName(context.config)}-from-run`,
         manuscriptId,
         action: screeningActionName(decision),
         outcome: "sent",
@@ -182,7 +171,7 @@ export async function runScreeningFromRun(page) {
       const screenshot = await context.screenshots.error(page, `from-run-error-${manuscriptId}`);
       await actionLog.record({
         runId: context.runId,
-        mode: "screening-from-run",
+        mode: `${assessmentWorkflowName(context.config)}-from-run`,
         manuscriptId,
         action: screeningActionName(decision),
         outcome: "failed",
@@ -204,7 +193,7 @@ export async function runScreeningFromRun(page) {
       break;
     }
 
-    await navigateToCompleteChecklistQueue(page);
+    await navigateToAdminQueue(page, context.config.assessmentQueueLabel);
   }
 
   return {
@@ -234,12 +223,20 @@ export function extractExecutableDecisions(payload) {
     .filter((entry) => entry.manuscriptId);
 }
 
-async function loadDecisions(source) {
+async function loadDecisions(source, expectedStage) {
   const absolutePath = resolveProjectPath(source);
   const raw = await fsp.readFile(absolutePath, "utf8").catch(() => null);
   if (raw === null) {
     throw new Error(`Nie udało się odczytać zapisanego przebiegu: ${path.basename(source)}`);
   }
 
-  return extractExecutableDecisions(JSON.parse(raw));
+  const payload = JSON.parse(raw);
+  const artifactStage = payload.config?.assessmentStage || "initial";
+  if (artifactStage !== expectedStage) {
+    throw new Error(
+      `Zapisany przebieg jest z etapu ${artifactStage}, a uruchomiono etap ${expectedStage}.`
+    );
+  }
+
+  return extractExecutableDecisions(payload);
 }

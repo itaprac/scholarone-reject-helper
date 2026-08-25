@@ -32,10 +32,15 @@ export function setQueueContext(next) {
 }
 
 export async function navigateToCompleteChecklistQueue(page) {
+  return navigateToAdminQueue(page, "Complete Checklist");
+}
+
+export async function navigateToAdminQueue(page, queueLabel) {
+  const queuePattern = new RegExp(`^${escapeRegExp(queueLabel).replace(/\s+/g, "\\s+")}$`, "i");
   await page.waitForLoadState("domcontentloaded").catch(() => undefined);
   await dismissCookieBanner(page);
 
-  if ((await countViewDetailsControls(page)) > 0) {
+  if ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel)) {
     return true;
   }
 
@@ -48,7 +53,8 @@ export async function navigateToCompleteChecklistQueue(page) {
     step: "initial",
     adminVisible,
     adminHref: await findHrefByText(page, /admin\s+center/i),
-    checklistHref: await findHrefByText(page, /\bcomplete\s+checklist\b/i),
+    queueLabel,
+    queueHref: await findHrefByText(page, queuePattern),
   });
 
   const adminHref = await findHrefByText(page, /admin\s+center/i);
@@ -98,33 +104,44 @@ export async function navigateToCompleteChecklistQueue(page) {
     url: page.url(),
   });
 
-  if ((await countViewDetailsControls(page)) > 0) {
+  if ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel)) {
     return true;
   }
 
-  let checklistClicked = await submitScholarOneLinkByText(page, /\bcomplete\s+checklist\b/i) ||
-    await activateLinkByText(page, /\bcomplete\s+checklist\b/i) ||
-    await clickTextControl(page, REJECT_PATTERNS.completeChecklistExact) ||
-    await clickTextControl(page, REJECT_PATTERNS.completeChecklist);
+  let checklistClicked = await submitScholarOneLinkByText(page, queuePattern) ||
+    await activateLinkByText(page, queuePattern) ||
+    (queueLabel === "Complete Checklist" && await clickTextControl(page, REJECT_PATTERNS.completeChecklistExact)) ||
+    (queueLabel === "Complete Checklist" && await clickTextControl(page, REJECT_PATTERNS.completeChecklist));
 
   if (checklistClicked) {
     await page.waitForLoadState("domcontentloaded").catch(() => undefined);
+    await waitForCondition(page, async () =>
+      await isCurrentAdminQueue(page, queueLabel) &&
+      ((await countViewDetailsControls(page)) > 0 || await isAdminQueueEmpty(page, queueLabel)), {
+      timeout: TIMEOUTS.navigation,
+    });
   } else {
-    const checklistHref = await findHrefByText(page, /\bcomplete\s+checklist\b/i);
+    const checklistHref = await findHrefByText(page, queuePattern);
     if (checklistHref) {
       checklistClicked = true;
       await page.goto(checklistHref, { waitUntil: "domcontentloaded" });
     }
   }
 
-  const ready = (await countViewDetailsControls(page)) > 0;
+  const ready = await isCurrentAdminQueue(page, queueLabel) &&
+    ((await countViewDetailsControls(page)) > 0 || await isAdminQueueEmpty(page, queueLabel));
   await ctx.log("navigate_to_queue_finished", {
     ready,
+    queueLabel,
     checklistClicked,
-    checklistHref: await findHrefByText(page, /\bcomplete\s+checklist\b/i),
+    checklistHref: await findHrefByText(page, queuePattern),
     url: page.url(),
   });
   return ready;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export async function dismissCookieBanner(page) {
@@ -152,10 +169,26 @@ export async function dismissCookieBanner(page) {
 }
 
 export async function isCompleteChecklistQueueEmpty(page) {
+  return isAdminQueueEmpty(page, "Complete Checklist");
+}
+
+export async function isAdminQueueEmpty(page, queueLabel) {
   return page.evaluate(() => {
     const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
-    return /(?:^|\s)0\s+Complete\s+Checklist(?:\s|$)/i.test(text);
-  }).catch(() => false);
+    return text;
+  }).then((text) => new RegExp(`(?:^|\\s)0\\s+${escapeRegExp(queueLabel).replace(/\s+/g, "\\s+")}(?:\\s|$)`, "i")
+    .test(text)).catch(() => false);
+}
+
+export async function isCurrentAdminQueue(page, queueLabel) {
+  return page.evaluate((expectedQueue) => {
+    const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
+    const currentPage = document.querySelector("input[name='CURRENT_PAGE']")?.value || "";
+    if (currentPage !== "ADMIN_VIEW_MANUSCRIPTS") return false;
+    return Array.from(document.querySelectorAll("b")).some(
+      (element) => clean(element.textContent).toLowerCase() === expectedQueue.toLowerCase()
+    );
+  }, queueLabel).catch(() => false);
 }
 
 export async function countViewDetailsControls(page) {
@@ -259,6 +292,36 @@ export async function openNextUnseenViewDetailsAcrossQueuePages(page, seenManusc
     maxQueuePageHops,
     seenCount: seenManuscriptIds.size,
   });
+  return false;
+}
+
+export async function openViewDetailsByManuscriptIdAcrossQueuePages(page, manuscriptId) {
+  const targetId = normalizeManuscriptId(manuscriptId);
+  const visitedQueuePages = new Set();
+
+  for (let hop = 0; hop < 500; hop += 1) {
+    const pageInfo = await readQueuePageInfo(page);
+    const queuePageKey = pageInfo?.selectedValue || pageInfo?.selectedLabel || `unknown-${hop}`;
+    if (visitedQueuePages.has(queuePageKey)) return false;
+    visitedQueuePages.add(queuePageKey);
+
+    const index = await page.evaluate((expectedId) => {
+      const selects = Array.from(
+        document.querySelectorAll("select[name^='SEL_MANUSCRIPT_DETAILS_JUMP_TO_TAB_']")
+      ).filter((select) => Array.from(select.options)
+        .some((option) => /view\s+details/i.test(option.textContent || "")));
+      return selects.findIndex((select) => {
+        const rowText = (select.closest("tr")?.innerText || "").toUpperCase();
+        return rowText.includes(expectedId);
+      });
+    }, targetId).catch(() => -1);
+
+    if (index >= 0) return openViewDetailsByIndex(page, index);
+    const advanced = await advanceQueueListPage(page);
+    if (!advanced.advanced) return false;
+    await ensureManuscriptListReady(page);
+  }
+
   return false;
 }
 
@@ -670,12 +733,13 @@ export async function ensureManuscriptListReady(page) {
     }
   }
 
-  const navigated = await navigateToCompleteChecklistQueue(page);
+  const queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist";
+  const navigated = await navigateToAdminQueue(page, queueLabel);
   if (navigated && (await countViewDetailsControls(page)) > 0) {
     return;
   }
 
   throw new Error(
-    "Nie widze kontrolek 'View Details'. Skrypt probowal przejsc przez Manage -> Admin Center -> Complete Checklist. Jesli layout jest inny, uruchom codegen albo podeślij screenshot Admin Center."
+    `Nie widze kontrolek 'View Details'. Skrypt probowal przejsc przez Manage -> Admin Center -> ${queueLabel}. Jesli layout jest inny, uruchom codegen albo podeślij screenshot Admin Center.`
   );
 }

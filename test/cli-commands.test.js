@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   translateRejectArgs,
   translateReviewerArgs,
+  translateEicScreenArgs,
   translateScreenArgs,
 } from "../src/cli-commands.js";
 
@@ -50,6 +51,31 @@ test("screen --live wykonuje decyzje i nie przechodzi całej kolejki", () => {
   const args = translateScreenArgs(["--live"]);
   assert.ok(args.includes("--apply-assessment-decisions"));
   assert.equal(args.includes("--scan-all-metadata"), false);
+});
+
+test("eic-screen używa osobnego etapu i domyślnie nie wykonuje decyzji", () => {
+  const args = translateEicScreenArgs([]);
+  assert.ok(args.includes("--assessment-stage=eic"));
+  assert.ok(args.includes("--collect-metadata"));
+  assert.ok(args.includes("--assess-with-llm"));
+  assert.ok(args.includes("--scan-all-metadata"));
+  assert.equal(args.includes("--apply-assessment-decisions"), false);
+});
+
+test("eic-screen --live wykonuje decyzje z Awaiting EIC", () => {
+  const args = translateEicScreenArgs(["--live"]);
+  assert.ok(args.includes("--assessment-stage=eic"));
+  assert.ok(args.includes("--apply-assessment-decisions"));
+  assert.equal(args.includes("--scan-all-metadata"), false);
+});
+
+test("eic-screen --from-run nie wywołuje modelu ponownie", () => {
+  const args = translateEicScreenArgs(["--from-run=logs/eic-assessment/a.json"]);
+  assert.deepEqual(args, [
+    "--headed",
+    "--assessment-stage=eic",
+    "--from-run=logs/eic-assessment/a.json",
+  ]);
 });
 
 test("reviewers --prepare nie wysyła zaproszeń", () => {
