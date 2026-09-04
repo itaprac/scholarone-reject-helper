@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P3 Workbench · ScholarOne helper</title>
+<script src="./proto-data.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: oklch(96.8% 0.005 250);
+  --surface: oklch(99% 0.003 255);
+  --side: oklch(98.2% 0.004 255);
+  --text: oklch(25% 0.012 255);
+  --muted: oklch(50% 0.015 255);
+  --line: oklch(88% 0.01 255);
+  --soft: oklch(95% 0.008 255);
+  --accent: oklch(47% 0.125 250);
+  --accent-soft: oklch(96% 0.025 250);
+  --focus: oklch(47% 0.125 250 / 0.3);
+  --danger: oklch(46% 0.14 28);
+  --danger-bg: oklch(94% 0.025 24);
+  --danger-line: oklch(78% 0.06 25);
+  --positive: oklch(48% 0.09 150);
+  --warn: oklch(52% 0.11 70);
+  --log-bg: oklch(22% 0.025 250);
+  --log-text: oklch(90% 0.025 250);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13.5px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; display: grid; grid-template-rows: 46px 1fr; height: 100dvh; overflow: hidden; }
+button, input, select, textarea { font: inherit; }
+h1, h2, h3, p { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+kbd { font-family: var(--mono); font-size: 11px; padding: 1px 5px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; background: var(--surface); color: var(--muted); }
+
+.topbar { display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font-size: 14.5px; font-weight: 650; }
+.brand span { color: var(--muted); font-size: 12px; }
+.queues-strip { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.queues-strip b { font-family: var(--mono); color: var(--text); }
+.queues-strip b[data-zero="true"] { color: var(--muted); font-weight: 500; }
+
+.work { display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
+/* Left: workflow tabs + form. Right: monitor above results. */
+.side { display: grid; grid-template-rows: auto 1fr auto; border-right: 1px solid var(--line); background: var(--side); min-height: 0; }
+.wf-tabs { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid var(--line); }
+.wf-tab { border: 0; border-right: 1px solid var(--line); background: transparent; padding: 9px 4px; font-size: 12px; font-weight: 600; color: var(--muted); cursor: pointer; }
+.wf-tab:last-child { border-right: 0; }
+.wf-tab[aria-selected="true"] { color: var(--accent); background: var(--surface); box-shadow: inset 0 -2px 0 var(--accent); }
+.wf-tab small { display: block; font-family: var(--mono); font-weight: 600; font-size: 11px; color: var(--text); }
+.side-body { overflow: auto; padding: 14px 16px; }
+.side h2 { font-size: 14.5px; font-weight: 650; }
+.side .desc { color: var(--muted); font-size: 12.5px; margin: 3px 0 14px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 11.5px; font-weight: 600; }
+label.field.wide { grid-column: span 2; }
+input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--text); padding: 6px 8px; min-height: 32px; font-weight: 400; font-size: 13px; }
+textarea { min-height: 110px; resize: vertical; line-height: 1.45; font-size: 12.5px; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-weight: 500; font-size: 12.5px; margin-top: 10px; color: var(--text); }
+.check input { width: 14px; min-height: 14px; margin-top: 2px; accent-color: var(--accent); }
+details.more { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; }
+details.more[open] summary { margin-bottom: 8px; color: var(--text); }
+.side-foot { border-top: 1px solid var(--line); padding: 12px 16px; background: var(--surface); display: grid; gap: 8px; }
+.side-foot .row { display: flex; gap: 8px; }
+.side-foot .row .btn { flex: 1; }
+.side-foot .hint { color: var(--muted); font-size: 11.5px; }
+.btn { min-height: 34px; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: oklch(42% 0.125 250); color: #fff; }
+.btn.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger); }
+.btn.danger:hover:not(:disabled) { border-color: var(--danger); }
+.btn.small { min-height: 28px; padding: 3px 8px; font-size: 12px; }
+
+.stage { display: grid; grid-template-rows: minmax(200px, 38%) 1fr; min-height: 0; }
+.monitor { display: grid; grid-template-rows: auto 1fr; min-height: 0; border-bottom: 1px solid var(--line); background: var(--surface); }
+.mon-head { display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot[data-state="running"] { background: var(--positive); box-shadow: 0 0 0 3px oklch(48% 0.09 150 / 0.2); }
+.dot[data-state="finished"] { background: var(--accent); }
+.dot[data-state="stopped"] { background: var(--warn); }
+.mon-head .name { font-weight: 650; font-family: var(--mono); font-size: 13px; }
+.mon-facts { display: flex; gap: 16px; color: var(--muted); font-family: var(--mono); font-size: 12px; margin-left: 8px; }
+.mon-facts b { color: var(--text); font-weight: 600; }
+.mon-head .spacer { flex: 1; }
+.log { overflow: auto; background: var(--log-bg); color: var(--log-text); font-family: var(--mono); font-size: 12px; line-height: 1.65; padding: 6px 0; }
+.log-row { display: flex; gap: 12px; padding: 0 12px; }
+.log-time { color: oklch(62% 0.025 250); flex: none; }
+.log-type { color: oklch(78% 0.1 250); min-width: 20ch; flex: none; }
+.log-row[data-tone="ok"] .log-type { color: oklch(80% 0.14 150); }
+.log-row[data-tone="warn"] .log-type { color: oklch(82% 0.12 80); }
+.log-empty { padding: 8px 12px; color: oklch(70% 0.02 250); font-family: -apple-system, system-ui, sans-serif; }
+
+.results { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+.res-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.res-head h3 { font-size: 13px; font-weight: 650; }
+.res-head select { width: auto; min-height: 28px; padding: 2px 6px; font-size: 12px; }
+.res-head .sum { color: var(--muted); font-size: 12px; }
+.res-head .spacer { flex: 1; }
+.res-body { overflow: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; background: var(--surface); }
+th, td { text-align: left; padding: 7px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { position: sticky; top: 0; color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: var(--soft); }
+td.num { text-align: right; font-family: var(--mono); font-size: 12px; }
+td .id { font-weight: 650; font-family: var(--mono); font-size: 12px; }
+td .title { display: block; color: var(--muted); font-size: 12px; }
+.decision { font-weight: 650; font-size: 12px; }
+.decision[data-d="REJECT"] { color: var(--danger); }
+.decision[data-d="APPROVE"] { color: var(--positive); }
+.decision[data-d="ERROR"] { color: var(--warn); }
+td.reason { color: var(--muted); font-size: 12px; max-width: 52ch; }
+tr.selectable { cursor: pointer; }
+tr.selectable:hover, tr.selectable[aria-selected="true"] { background: var(--accent-soft); }
+.pill { display: inline-block; min-width: 22px; border-radius: 999px; background: var(--soft); padding: 0 6px; text-align: center; font-family: var(--mono); font-size: 12px; }
+.res-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 14px; border-top: 1px solid var(--danger-line); background: var(--danger-bg); }
+.res-foot b { font-size: 12.5px; }
+.res-foot span { color: var(--muted); font-size: 12px; display: block; }
+
+@media (max-width: 900px) {
+  body { overflow: auto; height: auto; }
+  .work { grid-template-columns: 1fr; }
+  .stage { grid-template-rows: 300px auto; }
+  .queues-strip { display: none; }
+}
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>ScholarOne helper</h1><span>P3 · Workbench</span></div>
+    <div class="queues-strip" id="queuesStrip"></div>
+  </header>
+
+  <div class="work">
+    <aside class="side">
+      <div class="wf-tabs" role="tablist" id="wfTabs"></div>
+      <div class="side-body" id="sideBody"></div>
+      <div class="side-foot" id="sideFoot"></div>
+    </aside>
+
+    <section class="stage">
+      <div class="monitor">
+        <div class="mon-head">
+          <span class="dot" id="monDot" data-state="running"></span>
+          <span class="name" id="monName">reviewers invite</span>
+          <div class="mon-facts" id="monFacts"><span>pid <b>13371</b></span><span>since <b>00:28</b></span><span>papers <b>1/50</b></span><span>heartbeat <b>1 s</b></span></div>
+          <span class="spacer"></span>
+          <select class="small" id="runPick" aria-label="Run"><option>Live: follow current run</option><option>00:17 initial-assessment dry</option><option>00:16 reject dry</option><option>17:43 initial-assessment live</option></select>
+          <button class="btn small" id="stopBtn">Stop</button>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+
+      <div class="results" id="results"></div>
+    </section>
+  </div>
+
+<script>
+const P = window.PROTO;
+const state = { view: "screening", job: null, events: [], filter: "", selectedReport: "" };
+const cliEvents = [
+  { type: "paper_opened", id: "KES-26-1198", text: "Invite Reviewers, 10 invited", tone: "ok", at: new Date(Date.now() - 170000) },
+  { type: "invite_verified", id: "KES-26-1198", text: "counters 10/10 confirmed", tone: "ok", at: new Date(Date.now() - 164000) },
+  { type: "paper_opened", id: "KES-26-1201", text: "Select Reviewers", at: new Date(Date.now() - 120000) },
+  { type: "search_done", id: "KES-26-1201", text: "7 candidates found, need 10", at: new Date(Date.now() - 62000) },
+  { type: "create_account_popup_opened", id: "KES-26-1201", text: "adding external reviewer", tone: "warn", at: new Date(Date.now() - 1000) },
+];
+function wf(key) { return P.workflows.find((x) => x.key === key); }
+const queueFor = { reject: "Complete Checklist", screening: "Complete Checklist", eic: "Awaiting EIC Assignment", reviewers: "Select Reviewers" };
+
+function renderStrip() {
+  document.getElementById("queuesStrip").innerHTML = P.queues.filter((x) => x.focus).slice(0, 5).map((x) => `<span>${x.label} <b data-zero="${x.count === 0}">${x.count}</b></span>`).join("");
+}
+function renderTabs() {
+  document.getElementById("wfTabs").innerHTML = P.workflows.map((w, i) => {
+    const count = P.queues.find((x) => x.label === queueFor[w.key]).count;
+    return `<button class="wf-tab" role="tab" aria-selected="${state.view === w.key}" data-key="${w.key}" title="Alt+${i + 1}">${w.short}<small>${count}</small></button>`;
+  }).join("");
+  document.querySelectorAll(".wf-tab").forEach((t) => t.addEventListener("click", () => { state.view = t.dataset.key; renderAll(); }));
+}
+function fieldHtml(f) {
+  const cls = `field${f.wide ? " wide" : ""}`;
+  if (f.type === "select") return `<label class="${cls}">${f.label}<select>${f.options.map((o) => `<option ${o === f.value ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  return `<label class="${cls}">${f.label}<input type="${f.type}" value="${f.value}" placeholder="${f.placeholder || ""}"></label>`;
+}
+function renderSide() {
+  const w = wf(state.view);
+  document.getElementById("sideBody").innerHTML = `
+    <h2>${w.name}</h2><p class="desc">${w.summary}</p>
+    <div class="form-grid">${w.fields.map(fieldHtml).join("")}</div>
+    ${(w.checks || []).map((c) => `<label class="check"><input type="checkbox" ${c.checked ? "checked" : ""}>${c.label}</label>`).join("")}
+    <details class="more"><summary>Advanced</summary><div class="form-grid">${w.advanced.map(fieldHtml).join("")}</div></details>
+    ${w.texts.map((t) => `<details class="more"><summary>${t.label}</summary><label class="field"><textarea rows="${t.rows}">${t.id === "prompt" ? P.defaultPrompt : P.defaultEmail}</textarea></label></details>`).join("")}`;
+  document.getElementById("sideFoot").innerHTML = `
+    <div class="row"><button class="btn primary" id="dryBtn" ${state.job ? "disabled" : ""}>${w.dry}</button></div>
+    <div class="row"><button class="btn danger" id="liveBtn" ${state.job ? "disabled" : ""}>${w.live}</button></div>
+    <span class="hint"><kbd>⌘</kbd><kbd>↵</kbd> dry run · ${w.liveNote}</span>`;
+  document.getElementById("dryBtn").addEventListener("click", () => startJob(`${w.short} dry run`));
+  document.getElementById("liveBtn").addEventListener("click", () => { if (confirm(`${w.liveNote}\n\nStart ${w.live}?`)) startJob(`${w.short} live`); });
+}
+function renderResults() {
+  const w = wf(state.view);
+  const root = document.getElementById("results");
+  if (w.key === "reject") {
+    const sel = P.reports.find((r) => r.id === state.selectedReport);
+    root.innerHTML = `
+      <div class="res-head"><h3>Reports</h3><span class="sum">${P.reports.length} dry-run reports in logs/reports</span><span class="spacer"></span><button class="btn small">Refresh</button></div>
+      <div class="res-body"><table><thead><tr><th>Report</th><th>Status</th><th>Checked</th><th>Candidates</th><th>Progress</th></tr></thead>
+      <tbody>${P.reports.map((r) => `<tr class="selectable" tabindex="0" data-id="${r.id}" aria-selected="${state.selectedReport === r.id}"><td>${P.fmtWhen(r.at)}<span class="title">${r.id}.json</span></td><td>${r.status}</td><td class="num">${r.checked}</td><td><span class="pill">${r.candidates}</span></td><td>${r.sent ? `sent ${r.sent}` : "Not started"}</td></tr>`).join("")}</tbody></table></div>
+      <div class="res-foot"><div><b>${sel ? `${sel.candidates} candidates in selected report` : "Select a report"}</b><span>Rejects only the candidates listed. Already-sent manuscripts are skipped.</span></div><button class="btn danger" id="execBtn" ${sel && !state.job ? "" : "disabled"}>Reject selected report</button></div>`;
+  } else if (w.key === "reviewers") {
+    root.innerHTML = `
+      <div class="res-head"><h3>Current batch</h3><span class="sum">started 00:28 from CLI · Combined queue</span></div>
+      <div class="res-body"><table><thead><tr><th>Paper</th><th>Queue</th><th>Found</th><th>Invited</th><th>State</th></tr></thead><tbody>
+        <tr><td><span class="id">KES-26-1198</span><span class="title">Fuzzy inference for smart grid load balancing</span></td><td>Invite Reviewers</td><td class="num">10</td><td class="num">10</td><td><span class="decision" data-d="APPROVE">verified</span></td></tr>
+        <tr><td><span class="id">KES-26-1201</span><span class="title">Graph attention for supply chain anomaly detection</span></td><td>Select Reviewers</td><td class="num">7</td><td class="num">0</td><td>searching, create-account popup open</td></tr>
+        <tr><td><span class="id">KES-26-1204</span><span class="title">Ensemble forecasting of PV output with weather embeddings</span></td><td>Select Reviewers</td><td class="num">—</td><td class="num">—</td><td>queued</td></tr>
+      </tbody></table></div>
+      <div class="res-foot" style="border-color:var(--line);background:var(--surface)"><div><b>Invitations are verified per paper</b><span>The next paper starts only after ScholarOne counters confirm the previous one.</span></div></div>`;
+  } else {
+    const run = P.runs.find((r) => r.type === (w.key === "eic" ? "eic" : "screening"));
+    const rows = P.manuscripts.filter((m) => !state.filter || (state.filter === "ERROR" ? m.error : m.decision === state.filter));
+    const pending = P.manuscripts.filter((m) => m.decision && !m.action).length;
+    root.innerHTML = `
+      <div class="res-head"><h3>Results</h3>
+        <select id="runSel"><option>${P.fmtWhen(run.at)} · ${run.mode} · ${run.papers} papers</option><option>04 Sep 17:43 · live · 4 papers</option></select>
+        <select id="filterSel"><option value="">All</option><option value="APPROVE" ${state.filter === "APPROVE" ? "selected" : ""}>APPROVE</option><option value="REJECT" ${state.filter === "REJECT" ? "selected" : ""}>REJECT</option><option value="ERROR" ${state.filter === "ERROR" ? "selected" : ""}>Errors</option></select>
+        <span class="sum">APPROVE ${run.approve} · REJECT ${run.reject} · errors ${run.errors}</span><span class="spacer"></span><button class="btn small">Refresh</button></div>
+      <div class="res-body"><table><thead><tr><th>Manuscript</th><th>Decision</th><th>Reason</th><th>Tokens</th><th>Action</th></tr></thead>
+      <tbody>${rows.map((m) => `<tr><td><span class="id">${m.id}</span><span class="title">${m.title}</span></td><td><span class="decision" data-d="${m.decision || "ERROR"}">${m.decision || "ERROR"}</span></td><td class="reason">${m.reason}</td><td class="num">${m.tokens || "—"}</td><td>${m.action || "—"}</td></tr>`).join("")}</tbody></table></div>
+      <div class="res-foot"><div><b>${pending} decisions ready to execute</b><span>Applies the decisions above without asking the model again.</span></div><button class="btn danger" id="execBtn" ${pending && !state.job ? "" : "disabled"}>Execute these decisions</button></div>`;
+  }
+  root.querySelector("#execBtn")?.addEventListener("click", () => { if (confirm("Execute the decisions shown in the table?")) startJob(`${w.short} execute`); });
+  root.querySelector("#filterSel")?.addEventListener("change", (e) => { state.filter = e.target.value; renderResults(); });
+  root.querySelectorAll("tr.selectable").forEach((row) => {
+    const pick = () => { state.selectedReport = row.dataset.id; renderResults(); };
+    row.addEventListener("click", pick);
+    row.addEventListener("keydown", (e) => { if (["Enter", " "].includes(e.key)) { e.preventDefault(); pick(); } });
+  });
+}
+function renderMonitor() {
+  const events = state.job || state.events.length ? state.events : cliEvents;
+  const log = document.getElementById("log");
+  log.innerHTML = events.length ? events.map((e) => `<div class="log-row" data-tone="${e.tone || ""}"><span class="log-time">${P.fmtTime(e.at)}</span><span class="log-type">${e.type}</span><span>${e.id ? `<b>${e.id}</b> ` : ""}${e.text}</span></div>`).join("") : `<p class="log-empty">No run data yet.</p>`;
+  log.scrollTop = log.scrollHeight;
+  const dot = document.getElementById("monDot"), name = document.getElementById("monName"), facts = document.getElementById("monFacts");
+  if (state.job) {
+    dot.dataset.state = "running"; name.textContent = state.job.type;
+    const checked = state.events.filter((e) => e.type === "metadata_collected").length;
+    const dec = state.events.filter((e) => e.type === "llm_decision");
+    facts.innerHTML = `<span>step <b>${state.events.length}/${P.eventScript.length}</b></span><span>checked <b>${checked}</b></span><span>APPROVE <b>${dec.filter((d) => d.text.startsWith("APPROVE")).length}</b></span><span>REJECT <b>${dec.filter((d) => d.text.startsWith("REJECT")).length}</b></span>`;
+    document.getElementById("stopBtn").disabled = false;
+  } else if (state.events.length) {
+    dot.dataset.state = state.lastStatus === "stopped" ? "stopped" : "finished"; name.textContent = `${state.lastType} · ${state.lastStatus}`;
+    facts.innerHTML = `<span>exit <b>${state.lastStatus === "stopped" ? 130 : 0}</b></span><span>batch <b>logs/screening/2026-09-05T08-12-40-118Z.json</b></span>`;
+    document.getElementById("stopBtn").disabled = true;
+  }
+}
+function startJob(type) {
+  state.events = []; state.job = { type }; state.lastType = type;
+  state.job.ctl = P.startFakeJob({
+    onEvent: (e) => { state.events.push(e); renderMonitor(); },
+    onDone: (r) => { state.job = null; state.lastStatus = r.status; renderAll(); },
+  });
+  renderAll();
+}
+function renderAll() { renderTabs(); renderSide(); renderResults(); renderMonitor(); }
+document.getElementById("stopBtn").addEventListener("click", () => state.job?.ctl.stop());
+document.addEventListener("keydown", (e) => {
+  if (e.altKey && /^[1-4]$/.test(e.key)) { state.view = P.workflows[Number(e.key) - 1].key; renderAll(); }
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && !state.job) document.getElementById("dryBtn").click();
+});
+renderStrip(); renderAll();
+</script>
+</body>
+</html>

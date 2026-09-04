@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P5 Guided · ScholarOne helper</title>
+<script src="./proto-data.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: oklch(97.6% 0.004 255);
+  --surface: oklch(99% 0.003 255);
+  --text: oklch(25% 0.012 255);
+  --muted: oklch(50% 0.015 255);
+  --line: oklch(88% 0.01 255);
+  --soft: oklch(95% 0.008 255);
+  --accent: oklch(47% 0.125 250);
+  --accent-soft: oklch(96% 0.025 250);
+  --focus: oklch(47% 0.125 250 / 0.3);
+  --danger: oklch(46% 0.14 28);
+  --danger-bg: oklch(94% 0.025 24);
+  --danger-line: oklch(78% 0.06 25);
+  --positive: oklch(48% 0.09 150);
+  --warn: oklch(52% 0.11 70);
+  --log-bg: oklch(22% 0.025 250);
+  --log-text: oklch(90% 0.025 250);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+button, input, select, textarea { font: inherit; }
+h1, h2, h3, p { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font-size: 15px; font-weight: 650; }
+.brand span { color: var(--muted); font-size: 12px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 3px; gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 12px; border-radius: 6px; font-weight: 600; color: var(--muted); cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.seg button b { font-family: var(--mono); font-size: 12px; color: var(--text); background: var(--soft); border-radius: 999px; padding: 0 6px; }
+.seg button[aria-selected="true"] { background: var(--accent); color: #fff; }
+.seg button[aria-selected="true"] b { background: oklch(100% 0 0 / 0.2); color: #fff; }
+.job-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12.5px; color: var(--muted); }
+.job-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.job-pill[data-state="running"] { border-color: var(--positive); color: var(--text); }
+.job-pill[data-state="running"] .dot { background: var(--positive); box-shadow: 0 0 0 3px oklch(48% 0.09 150 / 0.2); }
+
+main { width: min(880px, calc(100% - 48px)); margin: 0 auto; padding: 28px 0 60px; }
+.intro { margin-bottom: 20px; }
+.intro h2 { font-size: 20px; font-weight: 650; }
+.intro p { color: var(--muted); margin-top: 4px; max-width: 64ch; }
+
+/* Stepper: four fixed steps, the safe path made visible. */
+.stepper { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 22px; }
+.stepper button { display: grid; gap: 3px; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; color: var(--muted); }
+.stepper button small { font-family: var(--mono); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.stepper button span { font-weight: 650; color: var(--text); }
+.stepper button em { font-style: normal; font-size: 12px; }
+.stepper button[data-state="current"] { border-color: var(--accent); background: var(--accent-soft); }
+.stepper button[data-state="current"] small { color: var(--accent); }
+.stepper button[data-state="done"] small { color: var(--positive); }
+.stepper button[data-state="done"] small::before { content: "✓ "; }
+.stepper button[data-state="locked"] { opacity: 0.55; cursor: not-allowed; }
+.stepper button[data-danger="true"][data-state="current"] { border-color: var(--danger); background: var(--danger-bg); }
+.stepper button[data-danger="true"][data-state="current"] small { color: var(--danger); }
+
+.card { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 22px 24px; }
+.card h3 { font-size: 15px; font-weight: 650; margin-bottom: 4px; }
+.card .lead { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+label.field.wide { grid-column: span 2; }
+label.field .help { font-weight: 400; font-size: 12px; }
+input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 8px 10px; min-height: 38px; font-weight: 400; }
+textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 500; font-size: 13.5px; margin-top: 14px; color: var(--text); }
+.check input { width: 16px; min-height: 16px; accent-color: var(--accent); }
+details.more { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 10px; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 600; }
+details.more[open] summary { margin-bottom: 12px; color: var(--text); }
+.nav { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+.nav .note { color: var(--muted); font-size: 12.5px; }
+.btn { min-height: 40px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: oklch(42% 0.125 250); color: #fff; }
+.btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.btn.danger:hover:not(:disabled) { background: oklch(40% 0.14 28); color: #fff; }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
+.summary div { border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; background: var(--bg); }
+.summary span { display: block; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.summary b { font-family: var(--mono); font-size: 20px; }
+.log { min-height: 200px; max-height: 320px; overflow: auto; border-radius: 6px; background: var(--log-bg); color: var(--log-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.7; padding: 8px 0; }
+.log-row { display: flex; gap: 12px; padding: 0 12px; }
+.log-time { color: oklch(62% 0.025 250); flex: none; }
+.log-type { color: oklch(78% 0.1 250); min-width: 20ch; flex: none; }
+.log-row[data-tone="ok"] .log-type { color: oklch(80% 0.14 150); }
+.log-row[data-tone="warn"] .log-type { color: oklch(82% 0.12 80); }
+.log-empty { padding: 8px 12px; color: oklch(70% 0.02 250); font-family: inherit; }
+.progress { height: 6px; border-radius: 3px; background: var(--soft); overflow: hidden; margin: 12px 0; }
+.progress i { display: block; height: 100%; background: var(--positive); transition: width 300ms ease-out; }
+
+.filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.filters select { width: auto; min-height: 32px; padding: 3px 8px; font-size: 13px; }
+.filters .sum { color: var(--muted); font-size: 12.5px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: var(--soft); }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+td .id { font-weight: 650; font-family: var(--mono); font-size: 12.5px; }
+td .title { display: block; color: var(--muted); font-size: 12.5px; }
+.decision { font-weight: 650; font-size: 12.5px; }
+.decision[data-d="REJECT"] { color: var(--danger); }
+.decision[data-d="APPROVE"] { color: var(--positive); }
+.decision[data-d="ERROR"] { color: var(--warn); }
+td.reason { color: var(--muted); font-size: 12.5px; max-width: 46ch; }
+tr.selectable { cursor: pointer; }
+tr.selectable:hover, tr.selectable[aria-selected="true"] { background: var(--accent-soft); }
+.pill { display: inline-block; min-width: 24px; border-radius: 999px; background: var(--soft); padding: 1px 7px; text-align: center; font-family: var(--mono); font-size: 12px; }
+td .skip { color: var(--muted); font-size: 12px; }
+.override { width: auto; min-height: 28px; padding: 2px 6px; font-size: 12px; }
+
+/* Execute step: the confirmation card states exactly what will happen. */
+.confirm { border: 1px solid var(--danger-line); border-radius: 8px; background: var(--danger-bg); padding: 16px 18px; margin-bottom: 16px; }
+.confirm h4 { margin: 0 0 8px; font-size: 14px; color: var(--danger); }
+.confirm ul { margin: 0 0 10px; padding-left: 18px; }
+.confirm li { margin: 3px 0; }
+.confirm .src { color: var(--muted); font-size: 12.5px; }
+.email-preview { border: 1px solid var(--line); border-radius: 6px; background: var(--surface); padding: 12px 14px; font-size: 13px; white-space: pre-wrap; max-height: 160px; overflow: auto; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .stepper { grid-template-columns: repeat(2, 1fr); }
+  .form-grid, .summary { grid-template-columns: 1fr; }
+  label.field.wide { grid-column: auto; }
+  .seg button span { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>ScholarOne helper</h1><span>P5 · Guided</span></div>
+    <div class="seg" role="tablist" id="seg"></div>
+    <span class="job-pill" id="jobPill" data-state="idle"><span class="dot"></span><span id="jobPillText">No job running</span></span>
+  </header>
+
+  <main>
+    <div class="intro" id="intro"></div>
+    <div class="stepper" id="stepper"></div>
+    <div class="card" id="card"></div>
+  </main>
+
+<script>
+const P = window.PROTO;
+const state = { wf: "screening", step: 1, done: { 1: true, 2: true }, job: null, events: [], filter: "", overrides: {}, selectedReport: "", confirmed: false };
+const queueFor = { reject: "Complete Checklist", screening: "Complete Checklist", eic: "Awaiting EIC Assignment", reviewers: "Select Reviewers" };
+const stepNames = {
+  default: [["Configure", "limits, model, texts"], ["Dry run", "nothing changes in ScholarOne"], ["Review", "check each decision"], ["Execute", "irreversible"]],
+  reject: [["Configure", "limits and email"], ["Dry run", "creates a report"], ["Review", "check the candidates"], ["Reject", "sends emails"]],
+  reviewers: [["Configure", "queue and counts"], ["Prepare", "finds reviewers"], ["Review", "check the lists"], ["Invite", "sends invitations"]],
+};
+function wf() { return P.workflows.find((x) => x.key === state.wf); }
+
+function renderSeg() {
+  document.getElementById("seg").innerHTML = P.workflows.map((w) => `<button role="tab" aria-selected="${state.wf === w.key}" data-key="${w.key}"><span>${w.name}</span><b>${P.queues.find((x) => x.label === queueFor[w.key]).count}</b></button>`).join("");
+  document.querySelectorAll("#seg button").forEach((b) => b.addEventListener("click", () => { state.wf = b.dataset.key; state.step = 1; state.confirmed = false; renderAll(); }));
+}
+function renderIntro() {
+  const w = wf(); const c = P.queues.find((x) => x.label === queueFor[w.key]).count;
+  document.getElementById("intro").innerHTML = `<h2>${w.name}</h2><p>${w.summary} ${queueFor[w.key]} has ${c} manuscript${c === 1 ? "" : "s"} right now.</p>`;
+}
+function renderStepper() {
+  const names = stepNames[state.wf] || stepNames.default;
+  document.getElementById("stepper").innerHTML = names.map(([n, d], i) => {
+    const s = i + 1;
+    const st = s === state.step ? "current" : state.done[s] ? "done" : (s <= 2 || state.done[s - 1]) ? "todo" : "locked";
+    return `<button data-step="${s}" data-state="${st}" data-danger="${s === 4}" ${st === "locked" ? "disabled" : ""}><small>Step ${s}</small><span>${n}</span><em>${d}</em></button>`;
+  }).join("");
+  document.querySelectorAll("#stepper button").forEach((b) => b.addEventListener("click", () => { if (!b.disabled) { state.step = Number(b.dataset.step); renderAll(); } }));
+}
+function fieldHtml(f) {
+  const cls = `field${f.wide ? " wide" : ""}`;
+  if (f.type === "select") return `<label class="${cls}">${f.label}<select>${f.options.map((o) => `<option ${o === f.value ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  return `<label class="${cls}">${f.label}<input type="${f.type}" value="${f.value}" placeholder="${f.placeholder || ""}"></label>`;
+}
+function renderCard() {
+  const w = wf(); const card = document.getElementById("card");
+  const names = stepNames[state.wf] || stepNames.default;
+  if (state.step === 1) {
+    card.innerHTML = `<h3>${names[0][0]}</h3><p class="lead">Settings are saved as you type and reused for the next run.</p>
+      <div class="form-grid">${w.fields.map(fieldHtml).join("")}</div>
+      ${(w.checks || []).map((c) => `<label class="check"><input type="checkbox" ${c.checked ? "checked" : ""}>${c.label}</label>`).join("")}
+      ${w.texts.map((t) => `<details class="more"><summary>${t.label}</summary><label class="field"><textarea rows="${t.rows}">${t.id === "prompt" ? P.defaultPrompt : P.defaultEmail}</textarea></label></details>`).join("")}
+      <details class="more"><summary>Advanced</summary><div class="form-grid">${w.advanced.map(fieldHtml).join("")}</div></details>
+      <div class="nav"><span class="note">Next step only reads ScholarOne.</span><button class="btn primary" id="next">Continue to ${names[1][0].toLowerCase()} →</button></div>`;
+    card.querySelector("#next").addEventListener("click", () => { state.done[1] = true; state.step = 2; renderAll(); });
+  } else if (state.step === 2) {
+    const running = Boolean(state.job);
+    const finished = !running && state.events.length > 0;
+    card.innerHTML = `<h3>${names[1][0]}</h3><p class="lead">${w.key === "reject" ? "Scans the queue and writes a report. No email is sent." : w.key === "reviewers" ? "Finds reviewer candidates for each paper. No invitation is sent." : "Collects title and abstract and asks the model. Nothing changes in ScholarOne."}</p>
+      <div class="summary"><div><span>Checked</span><b>${state.events.filter((e) => e.type === "metadata_collected").length}</b></div><div><span>Decisions</span><b>${state.events.filter((e) => e.type === "llm_decision").length}</b></div><div><span>Status</span><b style="font-size:14px">${running ? "running" : finished ? "finished" : "not started"}</b></div></div>
+      ${running || finished ? `<div class="progress"><i style="width:${Math.round(100 * state.events.length / P.eventScript.length)}%"></i></div>` : ""}
+      <div class="log" id="log">${logRows()}</div>
+      <div class="nav">
+        <button class="btn ghost" id="back">← Back</button>
+        <span class="note">${finished ? "Saved to logs/screening/2026-09-05T08-12-40-118Z.json" : running ? "You can leave this page; the run continues." : "Or skip and review the last saved run from 00:17."}</span>
+        <span>${running ? `<button class="btn" id="stop">Stop</button>` : `<button class="btn" id="skip">Use last run</button> <button class="btn primary" id="run">${finished ? "Continue to review →" : w.dry}</button>`}</span>
+      </div>`;
+    card.querySelector("#back").addEventListener("click", () => { state.step = 1; renderAll(); });
+    card.querySelector("#stop")?.addEventListener("click", () => state.job?.ctl.stop());
+    card.querySelector("#skip")?.addEventListener("click", () => { state.done[2] = true; state.step = 3; renderAll(); });
+    card.querySelector("#run")?.addEventListener("click", () => { if (finished) { state.done[2] = true; state.step = 3; renderAll(); } else startJob(); });
+  } else if (state.step === 3) {
+    card.innerHTML = `<h3>${names[2][0]}</h3><p class="lead">${w.key === "reject" ? "Pick the report to reject from. Only listed candidates are affected." : w.key === "reviewers" ? "Reviewer lists prepared per paper. Invitations go out in the next step." : "Every decision below will be applied in the next step. Change a decision here if you disagree with the model."}</p>
+      ${reviewHtml(w)}
+      <div class="nav"><button class="btn ghost" id="back">← Back</button><span class="note">${pendingCount(w)} action${pendingCount(w) === 1 ? "" : "s"} will be taken</span><button class="btn primary" id="next" ${pendingCount(w) ? "" : "disabled"}>Continue to ${names[3][0].toLowerCase()} →</button></div>`;
+    card.querySelector("#back").addEventListener("click", () => { state.step = 2; renderAll(); });
+    card.querySelector("#next").addEventListener("click", () => { state.done[3] = true; state.step = 4; state.confirmed = false; renderAll(); });
+    card.querySelector("#filterSel")?.addEventListener("change", (e) => { state.filter = e.target.value; renderCard(); });
+    card.querySelectorAll(".override").forEach((s) => s.addEventListener("change", () => { state.overrides[s.dataset.id] = s.value; renderCard(); }));
+    card.querySelectorAll("tr.selectable").forEach((row) => {
+      const pick = () => { state.selectedReport = row.dataset.id; renderCard(); };
+      row.addEventListener("click", pick);
+      row.addEventListener("keydown", (e) => { if (["Enter", " "].includes(e.key)) { e.preventDefault(); pick(); } });
+    });
+  } else {
+    const rej = decisions().filter((m) => m.final === "REJECT"); const app = decisions().filter((m) => m.final === "APPROVE");
+    card.innerHTML = `<h3>${names[3][0]}</h3><p class="lead">This step changes ScholarOne and sends email. It cannot be undone.</p>
+      <div class="confirm"><h4>What will happen</h4><ul>
+        ${w.key === "reject" ? `<li>Reject <b>${(P.reports.find((r) => r.id === state.selectedReport) || P.reports[1]).candidates}</b> manuscripts from report ${state.selectedReport || P.reports[1].id} and send the rejection email to each author.</li>` :
+          w.key === "reviewers" ? `<li>Invite <b>10</b> reviewers for each of <b>3</b> papers, one paper at a time, verifying counters before moving on.</li>` :
+          `<li>Reject <b>${rej.length}</b> manuscript${rej.length === 1 ? "" : "s"}: ${rej.map((m) => m.id).join(", ") || "none"}. Each author receives the rejection email.</li><li>Approve <b>${app.length}</b> manuscript${app.length === 1 ? "" : "s"}: ${app.map((m) => m.id).join(", ") || "none"}. ${w.key === "eic" ? "EIC and AE are assigned first." : "Checklist items are completed."}</li><li>Manuscripts already handled are skipped. The model is not asked again.</li>`}
+      </ul><span class="src">Source: ${w.key === "reject" ? "logs/reports/" : "logs/screening/"}2026-09-05T08-12-40-118Z.json</span></div>
+      ${w.key !== "reviewers" ? `<details class="more" open><summary>Email that will be sent</summary><div class="email-preview">${P.defaultEmail}</div></details>` : ""}
+      <label class="check"><input type="checkbox" id="ack" ${state.confirmed ? "checked" : ""}>I reviewed the list above and want to proceed.</label>
+      <div class="nav"><button class="btn ghost" id="back">← Back to review</button><span class="note">Stops on the first unconfirmed step.</span><button class="btn danger" id="go" ${state.confirmed && !state.job ? "" : "disabled"}>${w.live}</button></div>`;
+    card.querySelector("#back").addEventListener("click", () => { state.step = 3; renderAll(); });
+    card.querySelector("#ack").addEventListener("change", (e) => { state.confirmed = e.target.checked; card.querySelector("#go").disabled = !state.confirmed; });
+    card.querySelector("#go").addEventListener("click", () => { state.step = 2; state.execMode = true; renderAll(); startJob(); });
+  }
+}
+function decisions() { return P.manuscripts.filter((m) => m.decision && !m.action).map((m) => ({ ...m, final: state.overrides[m.id] || m.decision })).filter((m) => m.final !== "SKIP"); }
+function pendingCount(w) { if (w.key === "reject") return state.selectedReport ? (P.reports.find((r) => r.id === state.selectedReport).candidates) : 0; if (w.key === "reviewers") return 3; return decisions().length; }
+function reviewHtml(w) {
+  if (w.key === "reject") {
+    return `<div class="table-wrap"><table><thead><tr><th>Report</th><th>Status</th><th>Checked</th><th>Candidates</th><th>Progress</th></tr></thead>
+      <tbody>${P.reports.map((r) => `<tr class="selectable" tabindex="0" data-id="${r.id}" aria-selected="${state.selectedReport === r.id}"><td>${P.fmtWhen(r.at)}<span class="title">${r.id}.json</span></td><td>${r.status}</td><td class="num">${r.checked}</td><td><span class="pill">${r.candidates}</span></td><td>${r.sent ? `sent ${r.sent}` : "Not started"}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+  if (w.key === "reviewers") {
+    return `<div class="table-wrap"><table><thead><tr><th>Paper</th><th>Queue</th><th>Reviewers found</th><th>Will invite</th></tr></thead><tbody>
+      <tr><td><span class="id">KES-26-1201</span><span class="title">Graph attention for supply chain anomaly detection</span></td><td>Select Reviewers</td><td class="num">12</td><td class="num">10</td></tr>
+      <tr><td><span class="id">KES-26-1204</span><span class="title">Ensemble forecasting of PV output with weather embeddings</span></td><td>Select Reviewers</td><td class="num">10</td><td class="num">10</td></tr>
+      <tr><td><span class="id">KES-26-1207</span><span class="title">Interval type-2 fuzzy control of a quadrotor</span></td><td>Select Reviewers</td><td class="num">11</td><td class="num">10</td></tr>
+    </tbody></table></div>`;
+  }
+  const rows = P.manuscripts.filter((m) => !state.filter || (state.filter === "ERROR" ? m.error : m.decision === state.filter));
+  return `<div class="filters"><select id="filterSel"><option value="">All decisions</option><option value="APPROVE" ${state.filter === "APPROVE" ? "selected" : ""}>APPROVE</option><option value="REJECT" ${state.filter === "REJECT" ? "selected" : ""}>REJECT</option><option value="ERROR" ${state.filter === "ERROR" ? "selected" : ""}>Errors</option></select><span class="sum">6 papers · APPROVE 3 · REJECT 2 · errors 1 · 2 already handled</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Manuscript</th><th>Model says</th><th>Reason</th><th>Will do</th></tr></thead>
+    <tbody>${rows.map((m) => `<tr><td><span class="id">${m.id}</span><span class="title">${m.title}</span></td><td><span class="decision" data-d="${m.decision || "ERROR"}">${m.decision || "ERROR"}</span>${m.tokens ? `<span class="title">${m.tokens} tokens</span>` : ""}</td><td class="reason">${m.reason}</td><td>${m.action ? `<span class="skip">${m.action}, skipped</span>` : m.error ? `<span class="skip">no decision, skipped</span>` : `<select class="override" data-id="${m.id}"><option ${(state.overrides[m.id] || m.decision) === "APPROVE" ? "selected" : ""}>APPROVE</option><option ${(state.overrides[m.id] || m.decision) === "REJECT" ? "selected" : ""}>REJECT</option><option value="SKIP" ${state.overrides[m.id] === "SKIP" ? "selected" : ""}>Skip</option></select>`}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function logRows() {
+  if (!state.events.length) return `<p class="log-empty">Output appears here when the run starts.</p>`;
+  return state.events.map((e) => `<div class="log-row" data-tone="${e.tone || ""}"><span class="log-time">${P.fmtTime(e.at)}</span><span class="log-type">${e.type}</span><span>${e.id ? `<b>${e.id}</b> ` : ""}${e.text}</span></div>`).join("");
+}
+function renderPill() {
+  const pill = document.getElementById("jobPill");
+  pill.dataset.state = state.job ? "running" : "idle";
+  document.getElementById("jobPillText").textContent = state.job ? `${wf().short} ${state.execMode ? "execute" : "dry run"} · ${state.events.length}/${P.eventScript.length}` : state.events.length ? "Last job finished" : "No job running";
+}
+function startJob() {
+  state.events = []; state.job = {};
+  state.job.ctl = P.startFakeJob({
+    onEvent: (e) => { state.events.push(e); renderPill(); if (state.step === 2) { renderCard(); const l = document.getElementById("log"); if (l) l.scrollTop = l.scrollHeight; } },
+    onDone: () => { state.job = null; state.done[2] = true; renderPill(); renderAll(); },
+  });
+  renderPill(); renderAll();
+}
+function renderAll() { renderSeg(); renderIntro(); renderStepper(); renderCard(); }
+renderAll(); renderPill();
+</script>
+</body>
+</html>

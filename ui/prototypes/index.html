@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI prototypes · ScholarOne helper</title>
+<style>
+:root { --bg: oklch(97.6% 0.004 255); --surface: oklch(99% 0.003 255); --text: oklch(25% 0.012 255); --muted: oklch(50% 0.015 255); --line: oklch(88% 0.01 255); --accent: oklch(47% 0.125 250); --accent-soft: oklch(96% 0.025 250); }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+main { width: min(860px, calc(100% - 48px)); margin: 0 auto; padding: 36px 0 60px; }
+h1 { font-size: 20px; font-weight: 650; margin: 0 0 6px; }
+.lead { color: var(--muted); margin: 0 0 24px; max-width: 64ch; }
+ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+li { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); padding: 16px 18px; display: grid; grid-template-columns: 40px 1fr auto; gap: 14px; align-items: start; }
+li .n { font-family: ui-monospace, Menlo, monospace; font-weight: 700; color: var(--accent); font-size: 18px; }
+li h2 { font-size: 15px; font-weight: 650; margin: 0 0 4px; }
+li p { margin: 0; color: var(--muted); }
+li p.for { color: var(--text); margin-top: 6px; font-size: 13px; }
+li a.open { align-self: center; padding: 8px 14px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 600; white-space: nowrap; }
+li a.open:hover { background: oklch(42% 0.125 250); }
+.note { margin-top: 24px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--accent-soft); color: var(--muted); font-size: 13px; }
+.note b { color: var(--text); }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>UI prototypes</h1>
+  <p class="lead">Five layouts for the same workflow: configure, dry run, review, execute. All use mock data. Dry-run buttons play a fake job for about 7 seconds so you can see how each layout shows a running job. Live buttons only show a confirm dialog.</p>
+  <ol>
+    <li><span class="n">1</span><div><h2>Desk</h2><p>Queue counts become the navigation. A left rail lists ScholarOne queues with the workflow that consumes each one underneath. A job dock sits at the bottom of every page and expands to show the log.</p><p class="for">Best if you want to see "how many are waiting" and "what to run" in one glance without a separate Queues tab.</p></div><a class="open" href="./p1-desk.html">Open</a></li>
+    <li><span class="n">2</span><div><h2>Routine</h2><p>One page, no tabs. Four stations in the order manuscripts move through ScholarOne. Each shows its queue count, last run, and the two buttons. Results expand inline. Settings live in a side drawer.</p><p class="for">Best for a daily pass: scan top to bottom, run what has a non-zero count.</p></div><a class="open" href="./p2-routine.html">Open</a></li>
+    <li><span class="n">3</span><div><h2>Workbench</h2><p>Two panes that fill the window. Left: workflow tabs and the form with the run buttons pinned at the bottom. Right: live log on top, results below. Nothing scrolls off screen. Keyboard: Alt+1..4 switch workflow, Cmd+Enter starts a dry run.</p><p class="for">Best if you watch the automation as it runs and want the log always visible.</p></div><a class="open" href="./p3-workbench.html">Open</a></li>
+    <li><span class="n">4</span><div><h2>Ledger</h2><p>Runs are the main object. One chronological list of every run, each row showing how far it got on the path dry run, review, executed. Rows expand into results with the Execute button. New runs start from one menu that opens a drawer with the form.</p><p class="for">Best if the question you ask most often is "what did I run and what is still waiting for a decision".</p></div><a class="open" href="./p4-ledger.html">Open</a></li>
+    <li><span class="n">5</span><div><h2>Guided</h2><p>A four-step path per workflow: Configure, Dry run, Review, Execute. One step on screen at a time. The Review step lets you override single decisions. The Execute step spells out exactly what will happen and needs a checkbox before the red button unlocks.</p><p class="for">Best if the priority is never sending anything by mistake, at the cost of more clicks.</p></div><a class="open" href="./p5-guided.html">Open</a></li>
+  </ol>
+  <p class="note"><b>Current panel for comparison:</b> <a href="/">open the live UI</a>. Files: <code>ui/prototypes/</code>. Mock data in <code>proto-data.js</code>.</p>
+</main>
+</body>
+</html>

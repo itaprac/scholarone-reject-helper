@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P2 Routine · ScholarOne helper</title>
+<script src="./proto-data.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: oklch(97.4% 0.005 250);
+  --surface: oklch(99% 0.003 255);
+  --text: oklch(25% 0.012 255);
+  --muted: oklch(50% 0.015 255);
+  --line: oklch(88% 0.01 255);
+  --soft: oklch(95% 0.008 255);
+  --accent: oklch(47% 0.125 250);
+  --accent-soft: oklch(96% 0.025 250);
+  --focus: oklch(47% 0.125 250 / 0.3);
+  --danger: oklch(46% 0.14 28);
+  --danger-bg: oklch(94% 0.025 24);
+  --danger-line: oklch(78% 0.06 25);
+  --positive: oklch(48% 0.09 150);
+  --warn: oklch(52% 0.11 70);
+  --log-bg: oklch(22% 0.025 250);
+  --log-text: oklch(90% 0.025 250);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+button, input, select, textarea { font: inherit; }
+h1, h2, h3, p { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font-size: 15px; font-weight: 650; }
+.brand span { color: var(--muted); font-size: 12px; }
+.top-right { display: flex; align-items: center; gap: 10px; }
+.job-pill { display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 12.5px; cursor: pointer; color: var(--text); }
+.job-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.job-pill[data-state="running"] .dot { background: var(--positive); box-shadow: 0 0 0 3px oklch(48% 0.09 150 / 0.2); }
+.job-pill[data-state="running"] { border-color: var(--positive); }
+.job-pill b { font-family: var(--mono); font-weight: 600; }
+
+main { width: min(1040px, calc(100% - 48px)); margin: 0 auto; padding: 22px 0 60px; }
+.strip { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: var(--muted); font-size: 12.5px; margin-bottom: 18px; }
+.strip .counts { display: flex; gap: 18px; flex-wrap: wrap; }
+.strip .counts span b { font-family: var(--mono); color: var(--text); font-size: 13px; }
+
+/* Stations: one row per workflow, in the order manuscripts move through ScholarOne */
+.station { position: relative; display: grid; grid-template-columns: 120px 1fr auto; gap: 18px; align-items: start; padding: 16px 18px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.station + .station { margin-top: 22px; }
+.station + .station::before { content: ""; position: absolute; left: 58px; top: -23px; height: 22px; border-left: 2px solid var(--line); }
+.station + .station::after { content: ""; position: absolute; left: 54px; top: -7px; width: 6px; height: 6px; border-right: 2px solid var(--line); border-bottom: 2px solid var(--line); transform: rotate(45deg); }
+.station[data-active="true"] { border-color: var(--positive); }
+.queue { display: grid; gap: 2px; }
+.queue small { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.3; }
+.queue b { font-family: var(--mono); font-size: 26px; line-height: 1.1; font-weight: 700; }
+.queue b[data-zero="true"] { color: var(--muted); font-weight: 500; }
+.queue .also { color: var(--muted); font-size: 12px; margin-top: 4px; }
+.queue .also b { font-size: 13px; }
+.what h2 { font-size: 15.5px; font-weight: 650; }
+.what p { color: var(--muted); font-size: 12.5px; margin-top: 2px; max-width: 60ch; }
+.last { margin-top: 10px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.last .when { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.last button { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: 0; font-weight: 600; font-size: 13px; }
+.last .ready { color: var(--danger); font-weight: 650; }
+.live { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-family: var(--mono); font-size: 12.5px; color: var(--positive); }
+.live .bar { flex: 1; max-width: 220px; height: 4px; background: var(--soft); border-radius: 2px; overflow: hidden; }
+.live .bar i { display: block; height: 100%; background: var(--positive); transition: width 300ms ease-out; }
+.acts { display: flex; flex-direction: column; gap: 8px; align-items: stretch; min-width: 200px; }
+.acts .gear { align-self: flex-end; }
+.btn { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: oklch(42% 0.125 250); color: #fff; }
+.btn.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger); }
+.btn.danger:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); }
+.btn.ghost { border-color: transparent; color: var(--muted); font-weight: 500; min-height: 30px; padding: 3px 8px; font-size: 12.5px; }
+.btn.small { min-height: 30px; padding: 3px 9px; font-size: 12.5px; }
+
+.expand { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: 14px; margin-top: 4px; }
+.expand[hidden] { display: none; }
+.filters { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.filters select { width: auto; min-height: 30px; padding: 3px 8px; font-size: 12.5px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.filters .sum { color: var(--muted); font-size: 12.5px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: var(--soft); }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; font-family: var(--mono); font-size: 12.5px; }
+td .id { font-weight: 650; font-family: var(--mono); font-size: 12.5px; }
+td .title { display: block; color: var(--muted); font-size: 12.5px; }
+.decision { font-weight: 650; font-size: 12.5px; }
+.decision[data-d="REJECT"] { color: var(--danger); }
+.decision[data-d="APPROVE"] { color: var(--positive); }
+.decision[data-d="ERROR"] { color: var(--warn); }
+td.reason { color: var(--muted); font-size: 12.5px; max-width: 46ch; }
+tr.selectable { cursor: pointer; }
+tr.selectable:hover, tr.selectable[aria-selected="true"] { background: var(--accent-soft); }
+.pill { display: inline-block; min-width: 24px; border-radius: 999px; background: var(--soft); padding: 1px 7px; text-align: center; font-family: var(--mono); font-size: 12px; }
+.exec-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 12px; padding: 10px 12px; border: 1px solid var(--danger-line); border-radius: 6px; background: var(--danger-bg); }
+.exec-bar b { font-size: 13px; }
+.exec-bar span { color: var(--muted); font-size: 12.5px; display: block; }
+
+/* Drawer: settings or log */
+.drawer { position: fixed; inset: 0 0 0 auto; width: min(560px, 100%); background: var(--surface); border-left: 1px solid var(--line); z-index: 30; transform: translateX(100%); transition: transform 200ms ease-out; display: grid; grid-template-rows: auto 1fr auto; }
+.drawer[data-open="true"] { transform: none; box-shadow: -12px 0 32px oklch(25% 0.012 255 / 0.08); }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.drawer-head h3 { font-size: 15px; font-weight: 650; }
+.drawer-body { overflow: auto; padding: 18px 20px; }
+.drawer-foot { display: flex; gap: 8px; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--line); }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+label.field.wide { grid-column: span 2; }
+input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 9px; min-height: 36px; font-weight: 400; }
+textarea { min-height: 120px; resize: vertical; line-height: 1.5; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 500; font-size: 13px; margin-top: 12px; color: var(--text); }
+.check input { width: 15px; min-height: 15px; accent-color: var(--accent); }
+.drawer h4 { margin: 18px 0 8px; font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.drawer h4:first-child { margin-top: 0; }
+.scrim { position: fixed; inset: 0; background: oklch(25% 0.012 255 / 0.18); z-index: 25; display: none; }
+.scrim[data-open="true"] { display: block; }
+.log { min-height: 300px; height: 100%; overflow: auto; border-radius: 6px; background: var(--log-bg); color: var(--log-text); font-family: var(--mono); font-size: 12.5px; line-height: 1.7; padding: 8px 0; }
+.log-row { display: flex; gap: 12px; padding: 0 12px; }
+.log-time { color: oklch(62% 0.025 250); flex: none; }
+.log-type { color: oklch(78% 0.1 250); min-width: 18ch; flex: none; }
+.log-row[data-tone="ok"] .log-type { color: oklch(80% 0.14 150); }
+.log-row[data-tone="warn"] .log-type { color: oklch(82% 0.12 80); }
+.log-empty { padding: 8px 12px; color: oklch(70% 0.02 250); }
+.hist { list-style: none; margin: 14px 0 0; padding: 0; font-size: 12.5px; }
+.hist li { display: grid; grid-template-columns: 100px 1fr auto; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.hist .when { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.hist .out { color: var(--muted); }
+.hist li[data-status="failed"] .out { color: var(--danger); }
+
+@media (max-width: 760px) {
+  .station { grid-template-columns: 1fr; }
+  .station + .station::before, .station + .station::after { display: none; }
+  .acts { flex-direction: row; flex-wrap: wrap; }
+  .form-grid { grid-template-columns: 1fr; }
+  label.field.wide { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>ScholarOne helper</h1><span>P2 · Routine</span></div>
+    <div class="top-right">
+      <button class="job-pill" id="jobPill" data-state="idle" aria-haspopup="dialog"><span class="dot"></span><span id="jobPillText">No job running</span></button>
+      <button class="btn small" id="refreshBtn">Refresh queues</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="strip">
+      <div class="counts" id="counts"></div>
+      <span>ScholarOne read at 23:54 · saved status</span>
+    </div>
+    <div id="stations"></div>
+  </main>
+
+  <div class="scrim" id="scrim" data-open="false"></div>
+  <aside class="drawer" id="drawer" data-open="false" role="dialog" aria-labelledby="drawerTitle">
+    <div class="drawer-head"><h3 id="drawerTitle">Settings</h3><button class="btn ghost" id="drawerClose">Close</button></div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-foot" id="drawerFoot"></div>
+  </aside>
+
+<script>
+const P = window.PROTO;
+const state = { open: {}, filter: "", selectedReport: "", job: null, events: [], drawer: null };
+const stationQueues = { reject: ["complete-checklist"], screening: ["complete-checklist"], eic: ["awaiting-eic-assignment"], reviewers: ["select-reviewers", "invite-reviewers"] };
+const lastRuns = {
+  reject: { when: "2026-09-05T00:16", text: "dry run, 1 checked, 0 candidates", ready: 0, link: "Reports" },
+  screening: { when: "2026-09-05T00:17", text: "dry run, 6 papers, 1 error", ready: 3, link: "Review and execute" },
+  eic: { when: "2026-08-31T15:38", text: "dry run, 24 papers", ready: 24, link: "Review and execute" },
+  reviewers: { when: "2026-09-05T00:28", text: "invite, running from CLI", ready: 0, link: "Progress" },
+};
+function q(key) { return P.queues.find((x) => x.key === key); }
+
+function renderCounts() {
+  document.getElementById("counts").innerHTML = P.queues.filter((x) => x.focus).map((x) => `<span>${x.label} <b>${x.count}</b></span>`).join("");
+}
+
+function renderStations() {
+  const root = document.getElementById("stations");
+  root.innerHTML = P.workflows.map((w) => {
+    const qs = stationQueues[w.key].map(q);
+    const last = lastRuns[w.key];
+    const runningHere = state.job?.key === w.key || (w.key === "reviewers" && !state.job);
+    return `
+    <section class="station" data-key="${w.key}" data-active="${runningHere}">
+      <div class="queue">
+        <small>${qs[0].label}</small><b data-zero="${qs[0].count === 0}">${qs[0].count}</b>
+        ${qs[1] ? `<div class="also">${qs[1].label} <b>${qs[1].count}</b></div>` : ""}
+      </div>
+      <div class="what">
+        <h2>${w.name}</h2>
+        <p>${w.summary}</p>
+        <div class="last"><span class="when">${P.fmtWhen(last.when)}</span><span>${last.text}</span>${last.ready ? `<span class="ready">${last.ready} ready to execute</span>` : ""}<button data-expand="${w.key}" aria-expanded="${Boolean(state.open[w.key])}">${state.open[w.key] ? "Hide" : last.link} ${state.open[w.key] ? "▴" : "▾"}</button></div>
+        ${runningHere ? `<div class="live"><span>${state.job?.key === w.key ? state.job.type : "reviewers invite"}</span><span class="bar"><i style="width:${state.job?.key === w.key ? Math.round(100 * state.events.length / P.eventScript.length) : 2}%"></i></span><span>${state.job?.key === w.key ? `${state.events.length}/${P.eventScript.length} steps` : "1/50 papers"}</span></div>` : ""}
+      </div>
+      <div class="acts">
+        <button class="btn primary" data-dry="${w.key}" ${state.job ? "disabled" : ""}>${w.dry}</button>
+        <button class="btn danger" data-live="${w.key}" ${state.job ? "disabled" : ""}>${w.live}</button>
+        <button class="btn ghost gear" data-settings="${w.key}">Settings ⚙</button>
+      </div>
+      <div class="expand" ${state.open[w.key] ? "" : "hidden"}>${expandHtml(w)}</div>
+    </section>`;
+  }).join("");
+
+  root.querySelectorAll("[data-expand]").forEach((b) => b.addEventListener("click", () => { state.open[b.dataset.expand] = !state.open[b.dataset.expand]; renderStations(); }));
+  root.querySelectorAll("[data-dry]").forEach((b) => b.addEventListener("click", () => startJob(b.dataset.dry, "dry run")));
+  root.querySelectorAll("[data-live]").forEach((b) => b.addEventListener("click", () => { const w = P.workflows.find((x) => x.key === b.dataset.live); if (confirm(`${w.liveNote}\n\nStart ${w.live}?`)) startJob(w.key, "live"); }));
+  root.querySelectorAll("[data-settings]").forEach((b) => b.addEventListener("click", () => openSettings(b.dataset.settings)));
+  root.querySelectorAll("[data-exec]").forEach((b) => b.addEventListener("click", () => { if (confirm("Execute the decisions shown in the table?")) startJob(b.dataset.exec, "execute"); }));
+  root.querySelector("#filterSel")?.addEventListener("change", (e) => { state.filter = e.target.value; renderStations(); });
+  root.querySelectorAll("tr.selectable").forEach((row) => {
+    const pick = () => { state.selectedReport = row.dataset.id; renderStations(); };
+    row.addEventListener("click", pick);
+    row.addEventListener("keydown", (e) => { if (["Enter", " "].includes(e.key)) { e.preventDefault(); pick(); } });
+  });
+}
+
+function expandHtml(w) {
+  if (w.key === "reject") {
+    const sel = P.reports.find((r) => r.id === state.selectedReport);
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Report</th><th>Status</th><th>Checked</th><th>Candidates</th><th>Progress</th></tr></thead>
+      <tbody>${P.reports.map((r) => `<tr class="selectable" tabindex="0" data-id="${r.id}" aria-selected="${state.selectedReport === r.id}"><td>${P.fmtWhen(r.at)}<span class="title">${r.id}.json</span></td><td>${r.status}</td><td class="num">${r.checked}</td><td><span class="pill">${r.candidates}</span></td><td>${r.sent ? `sent ${r.sent}` : "Not started"}</td></tr>`).join("")}</tbody>
+    </table></div>
+    <div class="exec-bar"><div><b>${sel ? `${sel.candidates} candidates in selected report` : "Select a report"}</b><span>Rejects only the candidates listed. Already-sent manuscripts are skipped.</span></div><button class="btn danger" data-exec="reject" ${sel && !state.job ? "" : "disabled"}>Reject selected report</button></div>`;
+  }
+  if (w.key === "reviewers") {
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Paper</th><th>Queue</th><th>Found</th><th>Invited</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td><span class="id">KES-26-1198</span><span class="title">Fuzzy inference for smart grid load balancing</span></td><td>Invite Reviewers</td><td class="num">10</td><td class="num">10</td><td><span class="decision" data-d="APPROVE">verified</span></td></tr>
+        <tr><td><span class="id">KES-26-1201</span><span class="title">Graph attention for supply chain anomaly detection</span></td><td>Select Reviewers</td><td class="num">7</td><td class="num">0</td><td>searching, create-account popup open</td></tr>
+        <tr><td><span class="id">KES-26-1204</span><span class="title">Ensemble forecasting of PV output with weather embeddings</span></td><td>Select Reviewers</td><td class="num">—</td><td class="num">—</td><td>queued</td></tr>
+      </tbody></table></div>`;
+  }
+  const rows = P.manuscripts.filter((m) => !state.filter || (state.filter === "ERROR" ? m.error : m.decision === state.filter));
+  const pending = P.manuscripts.filter((m) => m.decision && !m.action).length;
+  const run = P.runs.find((r) => r.type === (w.key === "eic" ? "eic" : "screening"));
+  return `
+    <div class="filters"><select id="filterSel"><option value="">All decisions</option><option value="APPROVE" ${state.filter === "APPROVE" ? "selected" : ""}>APPROVE</option><option value="REJECT" ${state.filter === "REJECT" ? "selected" : ""}>REJECT</option><option value="ERROR" ${state.filter === "ERROR" ? "selected" : ""}>Errors</option></select><span class="sum">${run.id} · ${run.papers} papers · APPROVE ${run.approve} · REJECT ${run.reject} · errors ${run.errors}</span><button class="btn ghost" style="margin-left:auto">Older runs ▾</button></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Manuscript</th><th>Decision</th><th>Reason</th><th>Tokens</th><th>Action</th></tr></thead>
+      <tbody>${rows.map((m) => `<tr><td><span class="id">${m.id}</span><span class="title">${m.title}</span></td><td><span class="decision" data-d="${m.decision || "ERROR"}">${m.decision || "ERROR"}</span></td><td class="reason">${m.reason}</td><td class="num">${m.tokens || "—"}</td><td>${m.action || "—"}</td></tr>`).join("")}</tbody>
+    </table></div>
+    <div class="exec-bar"><div><b>${pending} decisions ready to execute</b><span>Applies the decisions above without asking the model again.</span></div><button class="btn danger" data-exec="${w.key}" ${pending && !state.job ? "" : "disabled"}>Execute these decisions</button></div>`;
+}
+
+function fieldHtml(f) {
+  const cls = `field${f.wide ? " wide" : ""}`;
+  if (f.type === "select") return `<label class="${cls}">${f.label}<select>${f.options.map((o) => `<option ${o === f.value ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  return `<label class="${cls}">${f.label}<input type="${f.type}" value="${f.value}" placeholder="${f.placeholder || ""}"></label>`;
+}
+
+function openSettings(key) {
+  const w = P.workflows.find((x) => x.key === key);
+  state.drawer = "settings";
+  document.getElementById("drawerTitle").textContent = `${w.name} settings`;
+  document.getElementById("drawerBody").innerHTML = `
+    <h4>Run</h4><div class="form-grid">${w.fields.map(fieldHtml).join("")}</div>
+    ${(w.checks || []).map((c) => `<label class="check"><input type="checkbox" ${c.checked ? "checked" : ""}>${c.label}</label>`).join("")}
+    <h4>Advanced</h4><div class="form-grid">${w.advanced.map(fieldHtml).join("")}</div>
+    ${w.texts.map((t) => `<h4>${t.label}</h4><label class="field"><textarea rows="${t.rows}">${t.id === "prompt" ? P.defaultPrompt : P.defaultEmail}</textarea></label>`).join("")}`;
+  document.getElementById("drawerFoot").innerHTML = `<button class="btn" id="drawerCancel">Cancel</button><button class="btn primary" id="drawerSave">Save settings</button>`;
+  document.getElementById("drawerCancel").addEventListener("click", closeDrawer);
+  document.getElementById("drawerSave").addEventListener("click", closeDrawer);
+  showDrawer();
+}
+
+function openLog() {
+  state.drawer = "log";
+  document.getElementById("drawerTitle").textContent = state.job ? `${state.job.type} · running` : "Job log";
+  document.getElementById("drawerBody").innerHTML = `<div class="log" id="log">${logRows()}</div><ul class="hist">${P.history.map((h) => `<li data-status="${h.status}"><span class="when">${P.fmtWhen(h.when)}</span><span>${h.label}</span><span class="out">${h.outcome}</span></li>`).join("")}</ul>`;
+  document.getElementById("drawerFoot").innerHTML = `<button class="btn danger" id="stopBtn" ${state.job ? "" : "disabled"}>Stop job</button>`;
+  document.getElementById("stopBtn").addEventListener("click", () => state.job?.ctl.stop());
+  showDrawer();
+}
+function logRows() {
+  if (!state.events.length) return `<p class="log-empty">No job output yet. Reviewers invite started from the CLI is visible in logs/current-run.json.</p>`;
+  return state.events.map((e) => `<div class="log-row" data-tone="${e.tone || ""}"><span class="log-time">${P.fmtTime(e.at)}</span><span class="log-type">${e.type}</span><span>${e.id ? `<b>${e.id}</b> ` : ""}${e.text}</span></div>`).join("");
+}
+function showDrawer() { document.getElementById("drawer").dataset.open = "true"; document.getElementById("scrim").dataset.open = "true"; }
+function closeDrawer() { document.getElementById("drawer").dataset.open = "false"; document.getElementById("scrim").dataset.open = "false"; state.drawer = null; }
+
+function renderPill() {
+  const pill = document.getElementById("jobPill");
+  pill.dataset.state = state.job ? "running" : "idle";
+  document.getElementById("jobPillText").innerHTML = state.job ? `${state.job.type} · <b>${state.events.length}/${P.eventScript.length}</b>` : (state.events.length ? "Last job finished, exit 0" : "No job running");
+  if (state.drawer === "log") { const log = document.getElementById("log"); if (log) { log.innerHTML = logRows(); log.scrollTop = log.scrollHeight; } }
+}
+
+function startJob(key, mode) {
+  const w = P.workflows.find((x) => x.key === key);
+  state.events = [];
+  state.job = { key, type: `${w.short} ${mode}` };
+  state.job.ctl = P.startFakeJob({
+    onEvent: (e) => { state.events.push(e); renderPill(); renderStations(); },
+    onDone: () => { state.job = null; renderPill(); renderStations(); },
+  });
+  renderPill(); renderStations();
+}
+
+document.getElementById("jobPill").addEventListener("click", openLog);
+document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+document.getElementById("scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+renderCounts(); renderStations(); renderPill();
+</script>
+</body>
+</html>

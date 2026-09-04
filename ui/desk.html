@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-layout="desk">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ScholarOne helper · Desk</title>
+    <link rel="stylesheet" href="/layouts.css">
+  </head>
+  <body class="desk">
+    <header class="topbar">
+      <div class="brand"><h1>ScholarOne helper</h1><span>Desk</span></div>
+      <div id="topStatus" class="top-status" data-tone="neutral"><span class="msg">Loading…</span></div>
+    </header>
+
+    <nav class="rail" id="rail" aria-label="Queues and workflows"></nav>
+
+    <main id="main"></main>
+
+    <div class="dock" id="dock" data-open="false">
+      <div class="dock-bar">
+        <button class="dock-toggle" id="dockToggle" type="button" aria-expanded="false" aria-controls="dockBody">▲ Job</button>
+        <span class="dot" id="dockDot" data-state="idle" aria-hidden="true"></span>
+        <span class="dock-name" id="dockName" role="status" aria-live="polite">No active job</span>
+        <span class="dock-progress" id="dockProgress"></span>
+        <button class="btn small" id="stopBtn" type="button" disabled>Stop</button>
+      </div>
+      <div class="dock-body" id="dockBody">
+        <div class="dock-cols">
+          <div>
+            <h4>Output</h4>
+            <pre class="output" id="dockOutput">No active job.</pre>
+          </div>
+          <div>
+            <h4>Recent jobs</h4>
+            <ul class="job-list" id="dockJobs"></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="/switcher.js"></script>
+    <script src="/shared.js"></script>
+    <script src="/desk.js"></script>
+  </body>
+</html>

@@ -925,8 +925,9 @@ function sendJson(res, payload, status = 200) {
 
 async function serveStatic(req, res, url) {
   let pathname = decodeURIComponent(url.pathname);
-  if (pathname === "/") {
-    pathname = "/index.html";
+  // Directory paths ("/", "/prototypes/") resolve to their index.html.
+  if (pathname.endsWith("/")) {
+    pathname = `${pathname}index.html`;
   }
 
   const filePath = path.resolve(uiRoot, `.${pathname}`);

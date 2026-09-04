@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P4 Ledger · ScholarOne helper</title>
+<script src="./proto-data.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: oklch(97.6% 0.004 255);
+  --surface: oklch(99% 0.003 255);
+  --text: oklch(25% 0.012 255);
+  --muted: oklch(50% 0.015 255);
+  --line: oklch(88% 0.01 255);
+  --soft: oklch(95% 0.008 255);
+  --accent: oklch(47% 0.125 250);
+  --accent-soft: oklch(96% 0.025 250);
+  --focus: oklch(47% 0.125 250 / 0.3);
+  --danger: oklch(46% 0.14 28);
+  --danger-bg: oklch(94% 0.025 24);
+  --danger-line: oklch(78% 0.06 25);
+  --positive: oklch(48% 0.09 150);
+  --positive-soft: oklch(95% 0.03 150);
+  --warn: oklch(52% 0.11 70);
+  --log-bg: oklch(22% 0.025 250);
+  --log-text: oklch(90% 0.025 250);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+button, input, select, textarea { font: inherit; }
+h1, h2, h3, p { margin: 0; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+.topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 24px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { font-size: 15px; font-weight: 650; }
+.brand span { color: var(--muted); font-size: 12px; }
+.newrun { position: relative; }
+.menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 300px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px oklch(25% 0.012 255 / 0.1); padding: 6px; display: none; z-index: 20; }
+.menu[data-open="true"] { display: block; }
+.menu button { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--text); }
+.menu button:hover { background: var(--accent-soft); }
+.menu button b { font-weight: 600; }
+.menu button small { color: var(--muted); font-size: 12px; grid-column: 1; }
+.menu button .q { grid-row: 1 / span 2; align-self: center; font-family: var(--mono); color: var(--muted); font-size: 12px; }
+.menu button .q b { font-size: 15px; color: var(--text); }
+
+main { width: min(1120px, calc(100% - 48px)); margin: 0 auto; padding: 22px 0 60px; }
+.counts { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 22px; }
+.count { display: inline-flex; align-items: baseline; gap: 8px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); font-size: 12.5px; color: var(--muted); }
+.count b { font-family: var(--mono); color: var(--text); font-size: 15px; }
+.count[data-zero="true"] b { color: var(--muted); font-weight: 500; }
+.counts .stamp { align-self: center; color: var(--muted); font-size: 12px; margin-left: auto; }
+
+.ledger-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
+.ledger-head h2 { font-size: 16px; font-weight: 650; }
+.ledger-head .filters { display: flex; gap: 6px; }
+.chip { border: 1px solid var(--line); border-radius: 999px; background: var(--surface); padding: 3px 10px; font-size: 12px; cursor: pointer; color: var(--muted); }
+.chip[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+
+/* The ledger: every run is a row; the stepper cells encode the safe path. */
+.ledger { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); overflow: hidden; }
+.row { display: grid; grid-template-columns: 96px 1.3fr 1.6fr 250px 150px; gap: 14px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row.head { background: var(--soft); color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 7px 16px; }
+.row.run { cursor: pointer; }
+.row.run:hover { background: var(--accent-soft); }
+.row.run[aria-expanded="true"] { background: var(--accent-soft); }
+.row.live { background: var(--positive-soft); }
+.when { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.what b { display: block; font-weight: 650; }
+.what small { color: var(--muted); font-size: 12px; }
+.outcome { font-size: 13px; }
+.outcome small { display: block; color: var(--muted); font-size: 12px; }
+.steps { display: flex; align-items: center; gap: 0; font-size: 11.5px; }
+.step { display: flex; align-items: center; gap: 5px; color: var(--muted); }
+.step i { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line); display: inline-grid; place-items: center; font-style: normal; font-size: 9px; }
+.step[data-done="true"] { color: var(--text); }
+.step[data-done="true"] i { border-color: var(--positive); background: var(--positive); color: #fff; }
+.step[data-now="true"] { color: var(--danger); font-weight: 650; }
+.step[data-now="true"] i { border-color: var(--danger); }
+.step[data-live="true"] i { border-color: var(--positive); background: oklch(48% 0.09 150 / 0.2); }
+.step + .step::before { content: ""; width: 14px; border-top: 1.5px solid var(--line); margin: 0 4px; }
+.act { justify-self: end; }
+.btn { min-height: 34px; padding: 6px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); font-weight: 600; cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn.primary:hover:not(:disabled) { background: oklch(42% 0.125 250); color: #fff; }
+.btn.danger { background: var(--danger-bg); border-color: var(--danger-line); color: var(--danger); }
+.btn.small { min-height: 28px; padding: 3px 9px; font-size: 12px; }
+.btn.ghost { border-color: transparent; color: var(--muted); }
+
+.detail { grid-column: 1 / -1; border-top: 1px dashed var(--line); padding-top: 12px; margin-top: 4px; cursor: default; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 6px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; background: var(--soft); }
+tbody tr:last-child td { border-bottom: 0; }
+td.num { text-align: right; font-family: var(--mono); font-size: 12px; }
+td .id { font-weight: 650; font-family: var(--mono); font-size: 12px; }
+td .title { display: block; color: var(--muted); font-size: 12px; }
+.decision { font-weight: 650; font-size: 12px; }
+.decision[data-d="REJECT"] { color: var(--danger); }
+.decision[data-d="APPROVE"] { color: var(--positive); }
+.decision[data-d="ERROR"] { color: var(--warn); }
+td.reason { color: var(--muted); font-size: 12px; max-width: 48ch; }
+.exec-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 9px 12px; border: 1px solid var(--danger-line); border-radius: 6px; background: var(--danger-bg); }
+.exec-bar b { font-size: 13px; }
+.exec-bar span { color: var(--muted); font-size: 12px; display: block; }
+.log { max-height: 240px; overflow: auto; border-radius: 6px; background: var(--log-bg); color: var(--log-text); font-family: var(--mono); font-size: 12px; line-height: 1.65; padding: 6px 0; }
+.log-row { display: flex; gap: 12px; padding: 0 12px; }
+.log-time { color: oklch(62% 0.025 250); flex: none; }
+.log-type { color: oklch(78% 0.1 250); min-width: 20ch; flex: none; }
+.log-row[data-tone="ok"] .log-type { color: oklch(80% 0.14 150); }
+.log-row[data-tone="warn"] .log-type { color: oklch(82% 0.12 80); }
+
+/* New run drawer */
+.scrim { position: fixed; inset: 0; background: oklch(25% 0.012 255 / 0.18); z-index: 25; display: none; }
+.scrim[data-open="true"] { display: block; }
+.drawer { position: fixed; inset: 0 0 0 auto; width: min(520px, 100%); background: var(--surface); border-left: 1px solid var(--line); z-index: 30; transform: translateX(100%); transition: transform 200ms ease-out; display: grid; grid-template-rows: auto 1fr auto; }
+.drawer[data-open="true"] { transform: none; }
+.drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.drawer-head h3 { font-size: 15px; font-weight: 650; }
+.drawer-head p { color: var(--muted); font-size: 12.5px; }
+.drawer-body { overflow: auto; padding: 18px 20px; }
+.drawer-foot { display: grid; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.drawer-foot .row2 { display: flex; gap: 8px; }
+.drawer-foot .row2 .btn { flex: 1; }
+.drawer-foot .note { color: var(--muted); font-size: 12px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+label.field { display: grid; gap: 4px; color: var(--muted); font-size: 12px; font-weight: 600; }
+label.field.wide { grid-column: span 2; }
+input, select, textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--text); padding: 7px 9px; min-height: 36px; font-weight: 400; }
+textarea { min-height: 110px; resize: vertical; line-height: 1.5; }
+.check { display: flex; gap: 8px; align-items: center; font-weight: 500; font-size: 13px; margin-top: 12px; color: var(--text); }
+.check input { width: 15px; min-height: 15px; accent-color: var(--accent); }
+.drawer h4 { margin: 18px 0 8px; font-size: 11px; color: var(--muted); font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.drawer h4:first-child { margin-top: 0; }
+details.more summary { cursor: pointer; color: var(--muted); font-size: 12.5px; font-weight: 600; margin-top: 14px; }
+
+@media (max-width: 860px) {
+  .row { grid-template-columns: 80px 1fr; }
+  .row.head { display: none; }
+  .steps, .act { grid-column: 2; justify-self: start; }
+  .form-grid { grid-template-columns: 1fr; }
+  label.field.wide { grid-column: auto; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><h1>ScholarOne helper</h1><span>P4 · Ledger</span></div>
+    <div class="newrun">
+      <button class="btn primary" id="newRunBtn" aria-haspopup="menu" aria-expanded="false">New run ▾</button>
+      <div class="menu" id="menu" role="menu"></div>
+    </div>
+  </header>
+
+  <main>
+    <div class="counts" id="counts"></div>
+    <div class="ledger-head">
+      <h2>Runs</h2>
+      <div class="filters" id="filters"></div>
+    </div>
+    <div class="ledger" id="ledger"></div>
+  </main>
+
+  <div class="scrim" id="scrim" data-open="false"></div>
+  <aside class="drawer" id="drawer" data-open="false" role="dialog" aria-labelledby="drawerTitle">
+    <div class="drawer-head"><div><h3 id="drawerTitle">New run</h3><p id="drawerSub"></p></div><button class="btn ghost small" id="drawerClose">Close</button></div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-foot" id="drawerFoot"></div>
+  </aside>
+
+<script>
+const P = window.PROTO;
+const state = { expanded: null, filter: "all", job: null, events: [], jobLabel: "" };
+const queueFor = { reject: "Complete Checklist", screening: "Complete Checklist", eic: "Awaiting EIC Assignment", reviewers: "Select Reviewers" };
+
+// Ledger entries in reverse time order. `stage` encodes how far along the safe path each run got.
+const ledger = [
+  { id: "cli-reviewers", when: "2026-09-05T00:28", key: "reviewers", label: "Reviewers", mode: "invite", outcome: "1 of 50 papers done", sub: "started from CLI, running", stage: "live", live: true },
+  { id: "2026-09-04T22-17-14-950Z", when: "2026-09-05T00:17", key: "screening", label: "Initial assessment", mode: "dry run", outcome: "6 papers · APPROVE 3 · REJECT 2 · 1 error", sub: "3 decisions not executed yet", stage: "review", pending: 3 },
+  { id: "2026-09-04T22-16-51-725Z", when: "2026-09-05T00:16", key: "reject", label: "Auto-reject", mode: "dry run", outcome: "1 checked · 0 candidates", sub: "nothing to reject", stage: "done-empty" },
+  { id: "2026-09-04T15-42-59-273Z", when: "2026-09-04T17:43", key: "screening", label: "Initial assessment", mode: "live", outcome: "4 decisions applied", sub: "APPROVE 2 · REJECT 2", stage: "executed" },
+  { id: "2026-09-04T15-24-41-051Z", when: "2026-09-04T17:24", key: "reviewers", label: "Reviewers", mode: "invite", outcome: "failed, exit 1", sub: "create-account popup not confirmed", stage: "failed" },
+  { id: "2026-08-31T13-38-10-267Z", when: "2026-08-31T15:38", key: "eic", label: "EIC assessment", mode: "dry run", outcome: "24 papers · APPROVE 15 · REJECT 9", sub: "24 decisions not executed yet", stage: "review", pending: 24 },
+  { id: "2026-08-26T07-05-01-345Z", when: "2026-08-26T09:05", key: "reject", label: "Auto-reject", mode: "dry run, then sent", outcome: "50 checked · 7 candidates · 7 sent", sub: "", stage: "executed" },
+];
+
+function wf(key) { return P.workflows.find((x) => x.key === key); }
+
+function renderCounts() {
+  document.getElementById("counts").innerHTML = P.queues.filter((x) => x.focus).map((x) => `<span class="count" data-zero="${x.count === 0}">${x.label}<b>${x.count}</b></span>`).join("") + `<span class="stamp">ScholarOne read 23:54 · <a href="#">refresh</a></span>`;
+}
+function renderMenu() {
+  document.getElementById("menu").innerHTML = P.workflows.map((w) => {
+    const c = P.queues.find((x) => x.label === queueFor[w.key]).count;
+    return `<button role="menuitem" data-key="${w.key}"><b>${w.name}</b><small>${w.summary}</small><span class="q">${queueFor[w.key]} <b>${c}</b></span></button>`;
+  }).join("");
+  document.querySelectorAll("#menu button").forEach((b) => b.addEventListener("click", () => { toggleMenu(false); openDrawer(b.dataset.key); }));
+}
+function toggleMenu(open) {
+  const m = document.getElementById("menu"); const o = open ?? m.dataset.open !== "true";
+  m.dataset.open = String(o); document.getElementById("newRunBtn").setAttribute("aria-expanded", String(o));
+}
+function renderFilters() {
+  const opts = [["all", "All"], ["review", "Needs review"], ["screening", "Initial"], ["eic", "EIC"], ["reject", "Reject"], ["reviewers", "Reviewers"]];
+  document.getElementById("filters").innerHTML = opts.map(([v, l]) => `<button class="chip" aria-pressed="${state.filter === v}" data-f="${v}">${l}</button>`).join("");
+  document.querySelectorAll(".chip").forEach((c) => c.addEventListener("click", () => { state.filter = c.dataset.f; renderLedger(); renderFilters(); }));
+}
+function stepsHtml(e) {
+  const s = e.stage;
+  const dry = { done: ["review", "done-empty", "executed"].includes(s) || (s === "live" && !e.live), live: s === "live" && !!e.live };
+  const reviewed = { done: ["executed", "done-empty"].includes(s), now: s === "review" };
+  const executed = { done: s === "executed", now: false };
+  if (s === "failed") return `<div class="steps"><span class="step" data-now="true"><i>!</i>failed</span></div>`;
+  if (s === "live" && e.live) return `<div class="steps"><span class="step" data-live="true"><i>●</i>running live</span></div>`;
+  if (s === "done-empty") return `<div class="steps"><span class="step" data-done="true"><i>✓</i>dry run</span><span class="step" data-done="true"><i>✓</i>empty</span></div>`;
+  return `<div class="steps">
+    <span class="step" data-done="${dry.done}"><i>${dry.done ? "✓" : ""}</i>dry run</span>
+    <span class="step" data-done="${reviewed.done}" data-now="${reviewed.now}"><i>${reviewed.done ? "✓" : ""}</i>review</span>
+    <span class="step" data-done="${executed.done}"><i>${executed.done ? "✓" : ""}</i>executed</span>
+  </div>`;
+}
+function renderLedger() {
+  const root = document.getElementById("ledger");
+  const rows = ledger.filter((e) => state.filter === "all" || (state.filter === "review" ? e.stage === "review" : e.key === state.filter));
+  const jobRow = state.job ? `<div class="row run live" aria-expanded="true"><span class="when">now</span><div class="what"><b>${state.jobLabel}</b><small>started from this panel</small></div><div class="outcome">${state.events.length} of ${P.eventScript.length} steps<small>${state.events.at(-1)?.type || "starting"}</small></div><div class="steps"><span class="step" data-live="true"><i>●</i>running</span></div><div class="act"><button class="btn small danger" id="stopBtn">Stop</button></div><div class="detail"><div class="log" id="jobLog">${logRows(state.events)}</div></div></div>` : "";
+  root.innerHTML = `<div class="row head"><span>When</span><span>Run</span><span>Outcome</span><span>Path</span><span></span></div>` + jobRow + rows.map((e) => {
+    const open = state.expanded === e.id;
+    const act = e.stage === "review" ? `<button class="btn small danger" data-exec="${e.id}">Execute ${e.pending}</button>` : e.stage === "failed" ? `<button class="btn small" data-retry="${e.key}">Retry</button>` : "";
+    return `<div class="row run ${e.live ? "live" : ""}" tabindex="0" data-id="${e.id}" aria-expanded="${open}">
+      <span class="when">${P.fmtWhen(e.when)}</span>
+      <div class="what"><b>${e.label}</b><small>${e.mode}${e.live ? " · from CLI" : ""}</small></div>
+      <div class="outcome">${e.outcome}<small>${e.sub}</small></div>
+      ${stepsHtml(e)}
+      <div class="act">${act}</div>
+      ${open ? `<div class="detail">${detailHtml(e)}</div>` : ""}
+    </div>`;
+  }).join("");
+  root.querySelectorAll(".row.run[data-id]").forEach((r) => {
+    const toggle = () => { state.expanded = state.expanded === r.dataset.id ? null : r.dataset.id; renderLedger(); };
+    r.addEventListener("click", (ev) => { if (ev.target.closest("button, .detail, a, select")) return; toggle(); });
+    r.addEventListener("keydown", (ev) => { if (["Enter", " "].includes(ev.key) && ev.target === r) { ev.preventDefault(); toggle(); } });
+  });
+  root.querySelectorAll("[data-exec]").forEach((b) => b.addEventListener("click", () => { const e = ledger.find((x) => x.id === b.dataset.exec); if (confirm(`Execute ${e.pending} decisions from ${e.label} ${P.fmtWhen(e.when)}?`)) startJob(`${e.label}, execute`); }));
+  root.querySelectorAll("[data-retry]").forEach((b) => b.addEventListener("click", () => openDrawer(b.dataset.retry)));
+  root.querySelector("#stopBtn")?.addEventListener("click", () => state.job?.ctl.stop());
+}
+function detailHtml(e) {
+  if (e.key === "screening" || e.key === "eic") {
+    const pending = P.manuscripts.filter((m) => m.decision && !m.action).length;
+    return `<div class="table-wrap"><table><thead><tr><th>Manuscript</th><th>Decision</th><th>Reason</th><th>Tokens</th><th>Action</th></tr></thead>
+      <tbody>${P.manuscripts.map((m) => `<tr><td><span class="id">${m.id}</span><span class="title">${m.title}</span></td><td><span class="decision" data-d="${m.decision || "ERROR"}">${m.decision || "ERROR"}</span></td><td class="reason">${m.reason}</td><td class="num">${m.tokens || "—"}</td><td>${e.stage === "executed" ? `done: ${m.decision}` : m.action || "—"}</td></tr>`).join("")}</tbody></table></div>
+      ${e.stage === "review" ? `<div class="exec-bar"><div><b>${pending} decisions ready to execute</b><span>Applies exactly these decisions. The model is not asked again; handled manuscripts are skipped.</span></div><button class="btn danger" data-exec="${e.id}">Execute these decisions</button></div>` : ""}`;
+  }
+  if (e.key === "reject") {
+    return `<div class="table-wrap"><table><thead><tr><th>Manuscript</th><th>Submitted</th><th>Rule</th><th>Result</th></tr></thead><tbody>
+      <tr><td><span class="id">KES-26-1229</span></td><td>04 Sep</td><td>no revision suffix, no unusual activity, newer than 30 days</td><td>skipped</td></tr>
+      ${e.stage === "executed" ? `<tr><td><span class="id">KES-26-0871</span></td><td>12 Jul</td><td>older than 30 days</td><td><span class="decision" data-d="REJECT">rejected, email sent</span></td></tr>` : ""}
+    </tbody></table></div>`;
+  }
+  return `<div class="log">${logRows([
+    { type: "paper_opened", id: "KES-26-1198", text: "Invite Reviewers, 10 invited", tone: "ok", at: new Date(e.when) },
+    { type: "invite_verified", id: "KES-26-1198", text: "counters 10/10 confirmed", tone: "ok", at: new Date(e.when) },
+    { type: "paper_opened", id: "KES-26-1201", text: "Select Reviewers", at: new Date(e.when) },
+    { type: e.stage === "failed" ? "run_failed" : "create_account_popup_opened", id: "KES-26-1201", text: e.stage === "failed" ? "popup not confirmed, exit 1" : "adding external reviewer", tone: e.stage === "failed" ? "bad" : "warn", at: new Date(e.when) },
+  ])}</div>`;
+}
+function logRows(events) {
+  if (!events.length) return `<div class="log-row"><span class="log-time">…</span><span class="log-type">starting</span><span>Chromium profile opening</span></div>`;
+  return events.map((ev) => `<div class="log-row" data-tone="${ev.tone || ""}"><span class="log-time">${P.fmtTime(ev.at)}</span><span class="log-type">${ev.type}</span><span>${ev.id ? `<b>${ev.id}</b> ` : ""}${ev.text}</span></div>`).join("");
+}
+function fieldHtml(f) {
+  const cls = `field${f.wide ? " wide" : ""}`;
+  if (f.type === "select") return `<label class="${cls}">${f.label}<select>${f.options.map((o) => `<option ${o === f.value ? "selected" : ""}>${o}</option>`).join("")}</select></label>`;
+  return `<label class="${cls}">${f.label}<input type="${f.type}" value="${f.value}" placeholder="${f.placeholder || ""}"></label>`;
+}
+function openDrawer(key) {
+  const w = wf(key);
+  const c = P.queues.find((x) => x.label === queueFor[key]).count;
+  document.getElementById("drawerTitle").textContent = w.name;
+  document.getElementById("drawerSub").textContent = `${queueFor[key]}: ${c} manuscripts now. ${w.summary}`;
+  document.getElementById("drawerBody").innerHTML = `
+    <h4>Run</h4><div class="form-grid">${w.fields.map(fieldHtml).join("")}</div>
+    ${(w.checks || []).map((ch) => `<label class="check"><input type="checkbox" ${ch.checked ? "checked" : ""}>${ch.label}</label>`).join("")}
+    <details class="more"><summary>Advanced</summary><div class="form-grid" style="margin-top:8px">${w.advanced.map(fieldHtml).join("")}</div></details>
+    ${w.texts.map((t) => `<details class="more"><summary>${t.label}</summary><label class="field" style="margin-top:8px"><textarea rows="${t.rows}">${t.id === "prompt" ? P.defaultPrompt : P.defaultEmail}</textarea></label></details>`).join("")}`;
+  document.getElementById("drawerFoot").innerHTML = `
+    <div class="row2"><button class="btn primary" id="dryBtn">${w.dry}</button><button class="btn danger" id="liveBtn">${w.live}</button></div>
+    <span class="note">Dry run adds a row to the ledger you can review and execute later. ${w.liveNote}</span>`;
+  document.getElementById("dryBtn").addEventListener("click", () => { closeDrawer(); startJob(`${w.name}, dry run`); });
+  document.getElementById("liveBtn").addEventListener("click", () => { if (confirm(`${w.liveNote}\n\nStart ${w.live}?`)) { closeDrawer(); startJob(`${w.name}, live`); } });
+  document.getElementById("drawer").dataset.open = "true"; document.getElementById("scrim").dataset.open = "true";
+}
+function closeDrawer() { document.getElementById("drawer").dataset.open = "false"; document.getElementById("scrim").dataset.open = "false"; }
+function startJob(label) {
+  state.events = []; state.jobLabel = label; state.job = {};
+  state.job.ctl = P.startFakeJob({
+    onEvent: (e) => { state.events.push(e); renderLedger(); const l = document.getElementById("jobLog"); if (l) l.scrollTop = l.scrollHeight; },
+    onDone: (r) => {
+      state.job = null;
+      ledger.unshift({ id: `new-${Date.now()}`, when: new Date().toISOString(), key: "screening", label: label.split(",")[0], mode: label.split(", ")[1] || "dry run", outcome: r.status === "stopped" ? "stopped by you" : "2 papers · APPROVE 1 · REJECT 1", sub: r.status === "stopped" ? "exit 130" : "2 decisions not executed yet", stage: r.status === "stopped" ? "failed" : "review", pending: 2 });
+      renderLedger();
+    },
+  });
+  renderLedger();
+}
+document.getElementById("newRunBtn").addEventListener("click", () => toggleMenu());
+document.addEventListener("click", (e) => { if (!e.target.closest(".newrun")) toggleMenu(false); });
+document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+document.getElementById("scrim").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); toggleMenu(false); } });
+renderCounts(); renderMenu(); renderFilters(); renderLedger();
+</script>
+</body>
+</html>

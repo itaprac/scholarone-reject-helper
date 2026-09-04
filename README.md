@@ -49,6 +49,19 @@ npm run ui
 
 Potem otwórz `http://localhost:3131`.
 
+Panel ma trzy układy tego samego przepływu (konfiguracja, dry run, przegląd,
+wykonanie). Przełącznik jest w prawym dolnym rogu, a `/` otwiera ostatnio
+używany układ:
+
+| Układ | Adres | Dla kogo |
+|---|---|---|
+| **Desk** | `/desk.html` | liczniki kolejek ScholarOne jako nawigacja, dok z bieżącym jobem na dole |
+| **Ledger** | `/ledger.html` | jedna chronologiczna lista przebiegów ze ścieżką dry run → review → executed |
+| **Classic** | `/index.html?layout=classic` | dotychczasowe zakładki |
+
+Desk i Ledger korzystają z tej samej warstwy `ui/shared.js`, która zapisuje
+ustawienia automatycznie (`ui-settings.json`) po każdej zmianie pola.
+
 Albo z terminala — **domyślny wariant każdej komendy jest bezpieczny**, czyli
 niczego nie wysyła:
 
