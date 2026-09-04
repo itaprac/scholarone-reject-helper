@@ -111,21 +111,39 @@ export async function submitRejectDecision(page) {
       function findRejectLink() {
         const links = Array.from(document.querySelectorAll("a"));
         const candidates = links
-          .map((candidate) => ({
-            candidate,
-            label: linkLabel(candidate),
-            rect: candidate.getBoundingClientRect(),
-          }))
-          .filter(({ label, rect }) =>
-            rect.width > 0 &&
-            rect.height > 0 &&
-            (/reject\.gif/i.test(label) || /immediately\s+reject/i.test(label) || /^reject$/i.test(label.trim()))
-          );
+          .map((candidate) => {
+            const rect = candidate.getBoundingClientRect();
+            const ownLabel = [
+              candidate.textContent,
+              candidate.getAttribute("value"),
+              candidate.getAttribute("title"),
+              candidate.getAttribute("aria-label"),
+              candidate.getAttribute("alt"),
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .replace(/\s+/g, " ")
+              .trim();
+            const actionScript = [
+              candidate.getAttribute("href"),
+              candidate.getAttribute("onclick"),
+            ]
+              .filter(Boolean)
+              .join(";");
+            const directImageLabels = Array.from(candidate.children)
+              .filter((child) => child.tagName === "IMG")
+              .map((image) => [image.getAttribute("alt"), image.getAttribute("src")].filter(Boolean).join(" "))
+              .join(" ");
+            const exactLabel = /^reject$/i.test(ownLabel);
+            const directRejectImage = /reject\.gif/i.test(directImageLabels);
+            const immediateRejectAction = /immediately\s+reject/i.test(actionScript);
+            const score = (immediateRejectAction ? 100 : 0) + (exactLabel ? 10 : 0) + (directRejectImage ? 5 : 0);
+            return { candidate, rect, score };
+          })
+          .filter(({ rect, score }) => rect.width > 0 && rect.height > 0 && score > 0)
+          .sort((left, right) => right.score - left.score);
 
-        return candidates.find(({ label }) => /immediately\s+reject/i.test(label))?.candidate ||
-          candidates.find(({ label }) => /reject\.gif/i.test(label))?.candidate ||
-          candidates[0]?.candidate ||
-          null;
+        return candidates[0]?.candidate || null;
       }
 
       function linkLabel(link) {
@@ -292,7 +310,7 @@ export async function clickSaveAndSend(emailPage, openerPage) {
   emailPage.on("dialog", dialogHandler);
 
   try {
-    const target = await findSaveAndSendControl(emailPage);
+    const target = await findSaveAndSendControl(emailPage, { timeout: TIMEOUTS.slowElement });
     if (!target) {
       return {
         clicked: false,
@@ -344,23 +362,29 @@ export async function clickSaveAndSend(emailPage, openerPage) {
   }
 }
 
-export async function findSaveAndSendControl(emailPage) {
-  for (const frame of emailPage.frames()) {
-    const locators = [
-      frame.locator(REJECT_SELECTORS.saveAndSendButton).first(),
-      frame.locator("a").filter({ has: frame.locator(REJECT_SELECTORS.saveAndSendImage) }).first(),
-      frame.locator(REJECT_SELECTORS.saveAndSendImage).first(),
-    ];
+export async function findSaveAndSendControl(emailPage, { timeout = 0 } = {}) {
+  const deadline = Date.now() + timeout;
+  do {
+    if (emailPage.isClosed()) return null;
+    for (const frame of emailPage.frames()) {
+      const locators = [
+        frame.locator(`${REJECT_SELECTORS.saveAndSendButton}:visible`).first(),
+        frame.locator("a:visible").filter({ has: frame.locator(REJECT_SELECTORS.saveAndSendImage) }).first(),
+        frame.locator(`${REJECT_SELECTORS.saveAndSendImage}:visible`).first(),
+      ];
 
-    for (const locator of locators) {
-      if ((await locator.count().catch(() => 0)) > 0) {
-        return {
-          locator,
-          frameName: frame.name() || null,
-        };
+      for (const locator of locators) {
+        if (await locator.isVisible().catch(() => false)) {
+          return {
+            locator,
+            frameName: frame.name() || null,
+          };
+        }
       }
     }
-  }
+    if (Date.now() >= deadline) break;
+    await emailPage.waitForTimeout(Math.min(100, deadline - Date.now())).catch(() => undefined);
+  } while (Date.now() < deadline);
 
   return null;
 }
@@ -417,6 +441,10 @@ export async function countSaveAndSendControls(page) {
 
 export async function submitScholarOneLinkByImageAlt(page, pattern) {
   let submitted = false;
+  const navigation = page.waitForNavigation({
+    waitUntil: "domcontentloaded",
+    timeout: TIMEOUTS.navigation,
+  }).then(() => null).catch((error) => error);
   try {
     submitted = await page.evaluate((source) => {
       const regex = new RegExp(source, "i");
@@ -510,10 +538,8 @@ export async function submitScholarOneLinkByImageAlt(page, pattern) {
     return false;
   }
 
-  await Promise.race([
-    page.waitForLoadState("domcontentloaded").catch(() => undefined),
-    page.waitForTimeout(12000),
-  ]);
+  const navigationError = await navigation;
+  if (navigationError) throw navigationError;
   return true;
 }
 

@@ -117,7 +117,12 @@ export async function readReviewerPage(page) {
     const clean = (value) => (value || "").replace(/\s+/g, " ").trim();
     const heading = Array.from(document.querySelectorAll("b"))
       .find((element) => /^reviewer\s+list$/i.test(clean(element.textContent)));
-    const headerText = clean(heading?.closest("tr")?.innerText || heading?.closest("tr")?.textContent);
+    const header = heading?.closest("tr");
+    const selectedRange = Array.from(header?.querySelectorAll("select") || [])
+      .flatMap((select) => Array.from(select.selectedOptions))
+      .map((option) => clean(option.textContent))
+      .find((text) => /\d+\s*-\s*\d+\s+of\s+\d+/i.test(text));
+    const headerText = selectedRange || clean(header?.innerText || header?.textContent);
     const reviewers = Array.from(document.querySelectorAll(rowSelector)).map((input) => {
       const row = input.closest("tr");
       const cells = Array.from(row?.children || []).filter((element) => element.tagName === "TD");
@@ -148,10 +153,14 @@ export async function readReviewerPage(page) {
   return { range, reviewers: raw.reviewers.filter(({ name }) => Boolean(name)) };
 }
 
-export async function readAllReviewerList(page, log = async () => undefined) {
+export async function readAllReviewerList(page, log = async () => undefined, { restorePage = true } = {}) {
+  await waitForReviewerListReady(page);
   const pagination = await readPagination(page, REVIEWER_SELECTORS.reviewerPagination);
   const originalValue = pagination?.value || null;
-  const values = pagination?.options.map(({ value }) => value) || [null];
+  const optionValues = pagination?.options.map(({ value }) => value) || [null];
+  const values = restorePage || !originalValue
+    ? optionValues
+    : [...new Set([originalValue, ...optionValues])];
   const reviewers = [];
   let reportedTotal = null;
 
@@ -162,7 +171,11 @@ export async function readAllReviewerList(page, log = async () => undefined) {
     const pageData = await readReviewerPage(page);
     reportedTotal = pageData.range.total;
     for (const reviewer of pageData.reviewers) {
-      if (!reviewers.some((existing) => existing.id === reviewer.id || samePerson(existing, reviewer))) {
+      // The server counts roster records. Two records can belong to the same
+      // person; merging names here makes a complete list look incomplete.
+      if (!reviewers.some((existing) => existing.id && reviewer.id
+        ? existing.id === reviewer.id
+        : samePerson(existing, reviewer))) {
         reviewers.push(reviewer);
       }
     }
@@ -173,8 +186,19 @@ export async function readAllReviewerList(page, log = async () => undefined) {
     });
   }
 
-  if (originalValue && originalValue !== (await currentPaginationValue(page, REVIEWER_SELECTORS.reviewerPagination))) {
-    await navigatePagination(page, REVIEWER_SELECTORS.reviewerPagination, originalValue);
+  if (restorePage && originalValue && originalValue !== (await currentPaginationValue(page, REVIEWER_SELECTORS.reviewerPagination))) {
+    try {
+      await navigatePagination(page, REVIEWER_SELECTORS.reviewerPagination, originalValue);
+    } catch (error) {
+      // Odczyt wszystkich stron już się udał. ScholarOne czasem ignoruje próbę
+      // powrotu do poprzedniej strony listy (zwłaszcza po 50+ recenzentach).
+      // To kosmetyczne odtworzenie widoku nie może unieważnić kompletnego odczytu.
+      await log("reviewer_list_restore_failed", {
+        originalValue,
+        currentValue: await currentPaginationValue(page, REVIEWER_SELECTORS.reviewerPagination),
+        message: error.message,
+      });
+    }
   }
   if (reportedTotal !== null && reviewers.length < reportedTotal) {
     throw new Error(`Reviewer List zgłasza ${reportedTotal} osób, ale odczytano tylko ${reviewers.length}.`);
@@ -226,25 +250,37 @@ export async function currentPaginationValue(page, selector) {
   return locator.inputValue({ timeout: 1_000 }).catch(() => null);
 }
 
-export async function navigatePagination(page, selector, value) {
-  const locator = page.locator(selector).first();
-  if (!(await locator.count())) throw new Error(`Zniknęła kontrolka paginacji ${selector}.`);
-  // ScholarOne submits the entire form here. With slowMo the navigation can
-  // start more than three seconds after selectOption, so the general-purpose
-  // short navigation helper is not sufficient for pagination.
-  const navigation = page.waitForNavigation({
-    waitUntil: "domcontentloaded",
-    timeout: 15_000,
-  }).then(() => true).catch(() => false);
-  await locator.selectOption(String(value));
-  const navigated = await navigation;
-  await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-  await page.waitForFunction(
-    ({ paginationSelector, expectedValue }) =>
-      document.querySelector(paginationSelector)?.value === expectedValue,
-    { paginationSelector: selector, expectedValue: String(value) },
-    { timeout: navigated ? 5_000 : 10_000 }
-  );
+export async function navigatePagination(page, selector, value, {
+  navigationTimeout = 15_000,
+  stateTimeout = 5_000,
+} = {}) {
+  const expectedValue = String(value);
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const locator = page.locator(selector).first();
+    if (!(await locator.count())) throw new Error(`Zniknęła kontrolka paginacji ${selector}.`);
+    const navigation = page.waitForNavigation({
+      waitUntil: "domcontentloaded",
+      timeout: navigationTimeout,
+    }).then(() => null).catch((error) => error);
+    try {
+      await locator.selectOption(expectedValue);
+      const navigationError = await navigation;
+      if (navigationError) throw navigationError;
+      await page.waitForFunction(
+        ({ paginationSelector, expected }) =>
+          document.querySelector(paginationSelector)?.value === expected,
+        { paginationSelector: selector, expected: expectedValue },
+        { timeout: stateTimeout }
+      );
+      return;
+    } catch (error) {
+      // Only repeat this read-only page request. A failed invitation or
+      // editorial decision must never enter this retry path.
+      if (page.isClosed() || attempt === 2) {
+        throw new Error(`Nie potwierdzono strony ${expectedValue} po ${attempt} próbach paginacji.`, { cause: error });
+      }
+    }
+  }
 }
 
 export function publicReviewer(reviewer) {

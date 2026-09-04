@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createRunStatus } from "../src/core/run-status.js";
+import { createRunStatus, workflowResultFailed } from "../src/core/run-status.js";
 
 async function makeStatus() {
   const logsDir = await fsp.mkdtemp(path.join(os.tmpdir(), "run-status-"));
@@ -61,6 +61,30 @@ test("run_failed oznacza przebieg jako nieudany", async () => {
   const status = await read();
   assert.equal(status.status, "failed");
   assert.equal(status.lastEvent.note, "boom");
+});
+
+test("a completed process with failed live actions is not a successful run", async () => {
+  const { runStatus, read } = await makeStatus();
+  await runStatus("run_finished", {
+    status: "assessment_batch_completed_with_errors",
+    summary: { actionErrors: 1 },
+  });
+  assert.equal((await read()).status, "failed");
+  assert.equal((await read()).resultStatus, "assessment_batch_completed_with_errors");
+});
+
+test("a failed final event retains the workflow result for diagnosis", async () => {
+  const { runStatus, read } = await makeStatus();
+  await runStatus("run_failed", { status: "action_failed", note: "Action not confirmed" });
+  assert.equal((await read()).resultStatus, "action_failed");
+});
+
+test("distinguishes workflow failures from normal limits and skipped manuscripts", () => {
+  assert.equal(workflowResultFailed({ status: "action_failed" }), true);
+  assert.equal(workflowResultFailed({ status: "needs_manual_review" }), true);
+  assert.equal(workflowResultFailed({ status: "search_reject_finished", results: [{ status: "save_send_failed" }] }), true);
+  assert.equal(workflowResultFailed({ status: "max_live_actions_reached" }), false);
+  assert.equal(workflowResultFailed({ status: "screening_from_run_finished", results: [{ status: "not_found_in_queue" }] }), false);
 });
 
 test("awaria zapisu nie wybucha", async () => {

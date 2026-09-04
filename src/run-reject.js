@@ -2,7 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { createBrowserSession } from "./core/browser.js";
 import { createLogger, waitUntilInterrupted } from "./core/logger.js";
-import { createRunStatus } from "./core/run-status.js";
+import { createRunStatus, workflowResultFailed } from "./core/run-status.js";
 import { ensureLoggedIn as ensureCoreLoggedIn } from "./core/login.js";
 import { pruneLogs } from "./core/log-retention.js";
 import { createScreenshotWriter } from "./core/screenshots.js";
@@ -122,7 +122,9 @@ export async function runReject(rawArgs = process.argv.slice(2)) {
       result.artifacts = await writeRunArtifacts(result, { config, runId, reportDir });
     }
 
-    await logEvent("run_finished", result);
+    const failed = workflowResultFailed(result);
+    await logEvent(failed ? "run_failed" : "run_finished", result);
+    if (failed) process.exitCode = 1;
     console.log(JSON.stringify(result, null, 2));
     return result;
   } catch (error) {

@@ -24,9 +24,11 @@ nieodwracalna.
 node bin/scholarone.js reviewers --invite --reviewers-per-paper=10
 ```
 
-Po wysłaniu automat odświeża stronę artykułu i wymaga potwierdzenia w statusach
-recenzentów albo we wzroście licznika `invited`. **Samo zamknięcie popupu nie
-jest uznawane za sukces.**
+Po wysłaniu automat odświeża stronę artykułu i czeka na potwierdzenie w statusach
+recenzentów albo we wzroście licznika `invited`. Sprawdza ponownie opóźnione
+aktualizacje strony, bez ponownego kliknięcia wysyłki. Wzrost licznika może
+potwierdzić wysyłkę tylko wtedy, gdy udało się odczytać jego wartość przed
+wysłaniem. **Samo zamknięcie popupu nie jest uznawane za sukces.**
 
 ## Kto liczy się do limitu
 
@@ -52,8 +54,10 @@ to wysłać zaproszenia drugi raz.
 
 Gdy dla artykułu zabraknie unikalnych kandydatów przed osiągnięciem celu,
 automat klika `Refresh Search`, zapamiętuje manuscript ID i odkłada artykuł.
-Najpierw przetwarza pozostałe pozycje z partii, a potem co
-`--refresh-wait-seconds` (domyślnie 60) wraca do odłożonych po dokładnym ID.
+Najpierw przetwarza pozostałe pozycje z partii, a potem wraca do odłożonych
+po dokładnym ID, z uwzględnieniem rewizji. Czas `--refresh-wait-seconds`
+(domyślnie 60) liczy od odłożenia artykułu. Jeśli ten czas upłynął podczas
+obsługi innych artykułów, nie czeka ponownie pełnej minuty.
 
 Jeśli odświeżanie nadal trwa albo artykuł jest chwilowo niewidoczny w obu
 kolejkach, czeka i próbuje ponownie. Pracę można przerwać przyciskiem `Stop` w
@@ -75,3 +79,14 @@ w którym ScholarOne pokazuje podobne konta — jeśli żadne nie pasuje dokład
 adresem e-mail, kandydat jest pomijany, a nie dodawany na oślep.
 
 Log krok po kroku trafia do `logs/select-reviewers-*.jsonl`.
+
+## Czas odczytu listy
+
+Workflow nadal sprawdza wszystkie strony `Reviewer List`. Zaczyna od strony
+już otwartej i pomija powrót do początkowego widoku, gdy nie jest on potrzebny
+do następnego kroku. Przy liście dwustronicowej zmniejsza to liczbę żądań
+potrzebnych do kolejnych pełnych odczytów z dwóch do jednego na odczyt.
+
+Pusta kolejka na początku oznacza poprawne zakończenie z zerową liczbą
+obsłużonych artykułów. Dla wyboru recenzentów automat sprawdza obie nazwy
+kolejki: `Assign Reviewers` oraz `Select Reviewers`.

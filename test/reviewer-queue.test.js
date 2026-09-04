@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { addCandidate } from "../src/reviewers/candidates.js";
+import { addCandidate, closeStalledCreateAccountPopup } from "../src/reviewers/candidates.js";
 import {
   candidateAddConfirmationState,
   canRecoverReviewerContext,
@@ -122,6 +122,30 @@ test("a missing Create Account popup falls through to roster verification", asyn
   assert.equal(events.at(-1).type, "candidate_add_popup_not_opened");
 });
 
+test("a stalled Create Account popup is closed before continuing", async () => {
+  const events = [];
+  let closed = false;
+  const popup = {
+    isClosed() { return closed; },
+    locator() {
+      return { innerText: async () => "Unrecognized ScholarOne response" };
+    },
+    async close() { closed = true; },
+  };
+
+  await closeStalledCreateAccountPopup(
+    popup,
+    { name: "Yi Zhang", email: "yi@example.com" },
+    async (type, payload) => events.push({ type, payload })
+  );
+
+  assert.equal(closed, true);
+  assert.deepEqual(events.map(({ type }) => type), [
+    "create_account_popup_stalled",
+    "create_account_popup_closed_after_stall",
+  ]);
+});
+
 test("deferred reviewer searches remember one exact manuscript and update its retry", () => {
   const queue = [];
   const first = {
@@ -147,11 +171,13 @@ test("deferred reviewer searches remember one exact manuscript and update its re
     manuscript: { manuscriptId: "KES-26-0116", title: "Example" },
     batchIndex: 1,
     attempts: 2,
+    deferredAt: queue[0].deferredAt,
     countTowardTarget: 9,
     target: 10,
     refreshRequested: false,
     reason: "not_visible_in_reviewer_queues",
   });
+  assert.equal(Number.isFinite(queue[0].deferredAt), true);
 });
 
 test("invitation verification includes reviewers selected before a deferred retry", () => {
@@ -285,4 +311,12 @@ test("an unrecognized roster change after Add remains a fatal ambiguity", () => 
   assert.equal(result.beforeTotal, 2);
   assert.equal(result.afterTotal, 3);
   assert.equal(result.afterCountTowardTarget, 3);
+});
+
+test("a replaced roster record is not unchanged just because the name matches", () => {
+  const result = candidateAddConfirmationState(
+    [{ id: "one", name: "Same Name" }, { id: "two", name: "Same Name" }],
+    [{ id: "one", name: "Same Name" }, { id: "three", name: "Same Name" }]
+  );
+  assert.equal(result.rosterUnchanged, false);
 });

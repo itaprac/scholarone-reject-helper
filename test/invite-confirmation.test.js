@@ -40,3 +40,18 @@ test("does not treat popup completion alone as invitation confirmation", () => {
   });
   assert.equal(result.confirmed, false);
 });
+
+test("does not invent a zero baseline when the initial counter is missing", () => {
+  assert.equal(confirmInvitationsSent({
+    beforeCounters: null, afterCounters: { invited: 20 }, afterReviewers: [],
+    expected: [{ id: "new", name: "New Reviewer" }],
+  }).confirmed, false);
+});
+
+test("does not use one invited record to confirm two different selected records", () => {
+  assert.equal(confirmInvitationsSent({
+    beforeCounters: null, afterCounters: null,
+    expected: [{ id: "one", name: "Same Name" }, { id: "two", name: "Same Name" }],
+    afterReviewers: [{ id: "one", name: "Same Name", status: "Invited" }],
+  }).confirmed, false);
+});

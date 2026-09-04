@@ -334,7 +334,10 @@ export async function runMetadataCollection(page) {
 
       console.log(`[LIVE ACTION] ${summary.manuscriptId}: wykonuję ${assessment.decision} w ScholarOne...`);
       try {
-        decisionAction = await applyLiveAssessmentDecision(page, assessment);
+        decisionAction = await applyLiveAssessmentDecision(page, {
+          ...assessment,
+          manuscriptId: summary.manuscriptId,
+        });
         decisionAction.screenshot = await context.screenshots.proof(
           page,
           `live-action-complete-${assessment.decision.toLowerCase()}-${summary.manuscriptId}`
@@ -568,6 +571,7 @@ export async function applyLiveAssessmentDecision(page, assessment) {
   if (isEicAssessment(context.config)) {
     return applyEicAssessmentDecision(page, assessment, {
       editorName: context.config.screeningEditorName,
+      manuscriptId: assessment.manuscriptId,
       rejectMessage: context.config.screeningRejectMessage,
     });
   }

@@ -5,6 +5,70 @@ import { chromium } from "playwright";
 import { extractPopWindowTarget } from "../src/select-reviewers.js";
 import { REVIEWER_SELECTORS } from "../src/reviewer-selectors.js";
 import { fixturePath, readFixture } from "./fixtures.js";
+import { clickFinalInviteAll, openInviteAllPopup } from "../src/reviewers/invitations.js";
+
+test("does not wait for a window close after the final popup has navigated", async () => {
+  let clicked = 0;
+  const popup = {
+    on() {}, off() {}, url: () => "https://scholarone.test/popup", isClosed: () => false,
+    waitForEvent: () => new Promise(() => {}),
+    waitForNavigation: async () => {},
+    locator: () => ({ count: async () => 1, click: async () => { clicked += 1; } }),
+  };
+  const result = await Promise.race([
+    clickFinalInviteAll(popup, async () => {}),
+    new Promise((resolve) => setTimeout(() => resolve(null), 100)),
+  ]);
+  assert.ok(result, "navigation is sufficient to start verification in the opener");
+  assert.equal(result.clicked, true);
+  assert.equal(result.popupClosed, false);
+  assert.equal(clicked, 1);
+});
+
+test("waits for the first Invite All button after the reviewer list is ready", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await context.route("https://scholarone.test/**", async (route) => {
+      await route.fulfill({ contentType: "text/html", body: `
+        <a href="javascript:void('EN_MASS_INVITE_POPUP')"><img src="/invite_all.gif" width="30" height="20"></a>` });
+    });
+    await page.setContent(`<p>Reviewer List ready</p><script>setTimeout(() => {
+      document.body.insertAdjacentHTML('beforeend', '<a href="https://scholarone.test/invite_all_popup" target="invite_all_popup"><img src="/invite_all.gif" width="30" height="20"></a>');
+    }, 75)</script>`);
+    const popup = await openInviteAllPopup(page, async () => {});
+    assert.notEqual(popup, page);
+    assert.match(popup.url(), /invite_all_popup/);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("waits for new contents when ScholarOne reuses a named invitation popup", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const context = await browser.newContext();
+    await context.route("https://scholarone.test/**", async (route) => {
+      const old = new URL(route.request().url()).pathname === "/old";
+      if (!old) await new Promise((resolve) => setTimeout(resolve, 150));
+      await route.fulfill({ contentType: "text/html", body: `<p>${old ? "Old invitation" : "New invitation"}</p>
+        <a href="javascript:void('EN_MASS_INVITE_POPUP')"><img src="/invite_all.gif" width="30" height="20"></a>` });
+    });
+    const page = await context.newPage();
+    await page.setContent(`<button onclick="window.open('https://scholarone.test/old','invite_all_popup')">Open</button>
+      <a href="https://scholarone.test/new_invite_all_popup" target="invite_all_popup"><img src="/invite_all.gif" width="30" height="20"></a>`);
+    const opened = page.waitForEvent("popup");
+    await page.locator("button").click();
+    const oldPopup = await opened;
+    await oldPopup.waitForLoadState("domcontentloaded");
+    const popup = await openInviteAllPopup(page, async () => {});
+    assert.equal(popup, oldPopup);
+    assert.equal(await popup.locator("p").innerText(), "New invitation");
+  } finally {
+    await browser.close();
+  }
+});
 
 const finalInvitePopupFile = fixturePath("invitePopup");
 

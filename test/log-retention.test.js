@@ -41,7 +41,8 @@ test("zrzuty mają ciaśniejszy próg niż logi tekstowe i ignorują limit wieku
   const logsDir = await makeLogsDir();
 
   for (let index = 0; index < 4; index++) {
-    await writeRun(logsDir, `2026-07-0${index + 1}T10-00-00-000Z`, { ageDays: 1 });
+    // Use distinct timestamps. Fast writes can share the same millisecond.
+    await writeRun(logsDir, `2026-07-0${index + 1}T10-00-00-000Z`, { ageDays: 4 - index });
   }
 
   await pruneLogs({ logsDir, keepRuns: 10, keepScreenshotRuns: 1, maxAgeDays: 30 });

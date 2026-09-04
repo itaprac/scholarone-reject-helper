@@ -236,6 +236,12 @@ export async function activateLinkByText(page, pattern) {
 // bo kliknięcie bywa przechwycone przez nakładki i skrypty strony.
 export async function submitScholarOneLinkByText(page, pattern, scriptPattern = null) {
   let submitted = false;
+  // Start before submit. The old document can already be DOMContentLoaded
+  // while the server is still processing the next page.
+  const navigation = page.waitForNavigation({
+    waitUntil: "domcontentloaded",
+    timeout: TIMEOUTS.navigation,
+  }).then(() => null).catch((error) => error);
 
   try {
     submitted = await page.evaluate(({ source, scriptSource }) => {
@@ -345,10 +351,8 @@ export async function submitScholarOneLinkByText(page, pattern, scriptPattern = 
 
   if (!submitted) return false;
 
-  await Promise.race([
-    page.waitForLoadState("domcontentloaded").catch(() => undefined),
-    page.waitForTimeout(TIMEOUTS.navigation),
-  ]);
+  const navigationError = await navigation;
+  if (navigationError) throw navigationError;
   return true;
 }
 

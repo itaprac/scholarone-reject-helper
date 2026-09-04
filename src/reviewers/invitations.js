@@ -6,10 +6,11 @@ import { classifyReviewerStatus } from "../reviewer-rules.js";
 import { TIMEOUTS } from "../core/timeouts.js";
 import { samePerson } from "../reviewer-rules.js";
 import { waitForNavigation } from "../core/navigation.js";
-import { publicPerson } from "./page.js";
+import { detectReviewerPageState, publicPerson, readAllReviewerList, readManuscriptIdentity } from "./page.js";
 
 export async function openInviteAllPopup(page, log) {
   const locator = page.locator(REVIEWER_SELECTORS.firstInviteAll);
+  await locator.first().waitFor({ state: "visible", timeout: TIMEOUTS.slowElement });
   const locatorCount = await locator.count();
   if (locatorCount !== 1) {
     throw new Error(`Oczekiwano jednego widocznego pierwszego Invite All, znaleziono ${locatorCount}.`);
@@ -94,11 +95,12 @@ export async function clickFinalInviteAll(popup, log) {
       throw new Error(`Oczekiwano jednego widocznego finalnego Invite All, znaleziono ${locatorCount}.`);
     }
     await log("final_invite_all_click_started", { url: popup.url() });
-    const closed = popup.waitForEvent("close", { timeout: 30_000 }).then(() => true).catch(() => false);
-    const navigation = waitForNavigation(popup, 30_000);
+    const closed = popup.waitForEvent("close", { timeout: 30_000 }).then(() => "closed").catch(() => null);
+    const navigation = waitForNavigation(popup, 30_000).then((ready) => ready ? "navigated" : null);
     await locator.click();
-    const [popupClosed] = await Promise.all([closed, navigation]);
-    await log("final_invite_all_click_finished", { popupClosed, dialogMessages });
+    const completion = await Promise.race([closed, navigation]);
+    const popupClosed = popup.isClosed();
+    await log("final_invite_all_click_finished", { popupClosed, completion, dialogMessages });
     return { clicked: true, popupClosed, dialogMessages };
   } finally {
     if (!popup.isClosed()) popup.off("dialog", dialogHandler);
@@ -110,9 +112,15 @@ export function reviewersPendingInvitation(reviewers) {
 }
 
 export function confirmInvitationsSent({ beforeCounters, afterCounters, afterReviewers, expected }) {
-  const invitedIncrease = (afterCounters?.invited || 0) - (beforeCounters?.invited || 0);
+  const countersAvailable = [beforeCounters?.invited, afterCounters?.invited]
+    .every((value) => Number.isInteger(value) && value >= 0);
+  const invitedIncrease = countersAvailable ? afterCounters.invited - beforeCounters.invited : null;
+  const matchedRecords = new Set();
   const expectedStatuses = expected.map((person) => {
-    const reviewer = afterReviewers.find((item) => samePerson(person, item));
+    const index = afterReviewers.findIndex((item, index) => !matchedRecords.has(index) &&
+      (person.id && item.id ? person.id === item.id : samePerson(person, item)));
+    if (index >= 0) matchedRecords.add(index);
+    const reviewer = afterReviewers[index];
     const classification = reviewer ? classifyReviewerStatus(reviewer) : null;
     return {
       person: publicPerson(person),
@@ -123,8 +131,8 @@ export function confirmInvitationsSent({ beforeCounters, afterCounters, afterRev
   });
   const confirmedExpected = expectedStatuses.filter(({ status }) => status === "invited").length;
   const confirmed = expected.length > 0
-    ? confirmedExpected === expected.length || invitedIncrease >= expected.length
-    : invitedIncrease > 0;
+    ? confirmedExpected === expected.length || (countersAvailable && invitedIncrease >= expected.length)
+    : countersAvailable && invitedIncrease > 0;
   return {
     confirmed,
     invitedIncrease,
@@ -134,6 +142,41 @@ export function confirmInvitationsSent({ beforeCounters, afterCounters, afterRev
     expectedCount: expected.length,
     expectedStatuses,
   };
+}
+
+export async function waitForInvitationConfirmation(page, {
+  manuscriptId, beforeCounters, expected, log,
+  timeout = TIMEOUTS.slowNavigation,
+}) {
+  const deadline = Date.now() + timeout;
+  let nextRosterRead = 0;
+  let confirmation = confirmInvitationsSent({ beforeCounters, afterCounters: null, afterReviewers: [], expected });
+  do {
+    if (page.isClosed()) throw new Error("Karta została zamknięta podczas potwierdzania zaproszeń.");
+    if (await detectReviewerPageState(page) === "reviewer_article") {
+      const identity = await readManuscriptIdentity(page);
+      if (identity.manuscriptId !== manuscriptId) {
+        throw new Error(`Weryfikacja zaproszeń otworzyła inny manuskrypt niż ${manuscriptId}.`);
+      }
+      const afterCounters = await readArticleCounters(page);
+      confirmation = confirmInvitationsSent({ beforeCounters, afterCounters, afterReviewers: [], expected });
+      if (confirmation.confirmed) return confirmation;
+      // Poll counters frequently. Full roster reads can require server requests.
+      if (Date.now() >= nextRosterRead) {
+        const afterReviewers = await readAllReviewerList(page, log, { restorePage: false });
+        const afterIdentity = await readManuscriptIdentity(page);
+        if (afterIdentity.manuscriptId !== manuscriptId) {
+          throw new Error(`Reviewer List nie należy do ${manuscriptId}.`);
+        }
+        confirmation = confirmInvitationsSent({ beforeCounters, afterCounters, afterReviewers, expected });
+        if (confirmation.confirmed) return confirmation;
+        nextRosterRead = Date.now() + 2_000;
+      }
+    }
+    if (Date.now() >= deadline) break;
+    await page.waitForTimeout(250);
+  } while (Date.now() < deadline);
+  return confirmation;
 }
 
 export async function readArticleCounters(page) {

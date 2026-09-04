@@ -74,6 +74,7 @@ import {
   openInviteAllPopup,
   readArticleCounters,
   reviewersPendingInvitation,
+  waitForInvitationConfirmation,
 } from "./reviewers/invitations.js";
 
 // Re-eksport zachowuje dotychczasowe punkty wejścia modułu.
@@ -100,7 +101,7 @@ import { DEFAULTS } from "./config/defaults.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, "..");
 
-export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
+export async function runSelectReviewers(rawArgs = process.argv.slice(2), { createSession = createBrowserSession } = {}) {
   const args = parseArgs(rawArgs);
   const env = loadEnvFile(path.join(projectRoot, ".env"));
   const credentials = loadLoginCredentials(args, env);
@@ -130,7 +131,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
   await pruneLogs({ logsDir: config.logsDir }).catch(() => undefined);
   await log("run_started", publicConfig(config));
 
-  const session = await createBrowserSession(config);
+  const session = await createSession(config);
   const { page } = session;
   page.setDefaultTimeout(TIMEOUTS.default);
   let batchIndex = 0;
@@ -193,7 +194,7 @@ export async function runSelectReviewers(rawArgs = process.argv.slice(2)) {
           !isReviewerManuscriptSkippedResult(result)
         ) break;
       } catch (error) {
-        if ((batchIndex > 1 || deferredReviewers.length > 0) && isQueueExhaustedError(error)) {
+        if (isQueueExhaustedError(error)) {
           queueExhausted = true;
           await log("reviewer_queue_exhausted", {
             batchIndex,
@@ -312,6 +313,7 @@ export function rememberDeferredReviewer(queue, result, batchIndex, attempts = 1
     manuscript: result.manuscript,
     batchIndex,
     attempts,
+    deferredAt: Date.now(),
     countTowardTarget: result.countTowardTarget,
     target: result.target,
     refreshRequested: result.refreshRequested,
@@ -323,12 +325,13 @@ export function rememberDeferredReviewer(queue, result, batchIndex, attempts = 1
   return pending;
 }
 
-async function waitForReviewerRefresh(page, config, log, pending) {
-  let remaining = config.refreshWaitMs;
+export async function waitForReviewerRefresh(page, config, log, pending) {
+  const elapsed = Number.isFinite(pending.deferredAt) ? Math.max(0, Date.now() - pending.deferredAt) : 0;
+  let remaining = Math.max(0, config.refreshWaitMs - elapsed);
   await log("deferred_reviewer_wait_started", {
     manuscriptId: pending.manuscriptId,
     attempt: pending.attempts,
-    waitSeconds: Math.round(config.refreshWaitMs / 1000),
+    waitSeconds: Math.ceil(remaining / 1000),
     reason: pending.reason,
   });
   while (remaining > 0) {
@@ -398,7 +401,7 @@ async function runBatchReviewerManuscript(page, options) {
       if (config.reviewerQueueMode === "combined" && canRecoverReviewerContext(error.reviewerContext)) {
         return recoverReviewerManuscript(page, options, error);
       }
-      if (config.reviewerQueueMode !== "combined" || !isQueueExhaustedError(error)) throw error;
+      if (!isQueueExhaustedError(error)) throw error;
 
       lastQueueError = error;
       await log("combined_queue_source_empty", { batchIndex, queueLabel, message: error.message });
@@ -406,9 +409,7 @@ async function runBatchReviewerManuscript(page, options) {
     }
   }
 
-  const error = new Error("Brak artykułów w Invite Reviewers ani Assign/Select Reviewers.");
-  error.cause = lastQueueError;
-  throw error;
+  throw lastQueueError;
 }
 
 async function recoverReviewerManuscript(page, options, originalError) {
@@ -492,7 +493,7 @@ async function returnToReviewerStart(page, config, log, reason) {
   }
 }
 
-async function runOneReviewerManuscript(page, {
+export async function runOneReviewerManuscript(page, {
   config,
   log,
   logFile,
@@ -505,6 +506,7 @@ async function runOneReviewerManuscript(page, {
 }) {
   let stage = "opening_queue";
   let manuscript = null;
+  let expectedManuscriptId = targetManuscriptId;
 
   try {
     await ensureReviewerQueue(page, config, log, queueLabel);
@@ -515,17 +517,13 @@ async function runOneReviewerManuscript(page, {
       targetManuscriptId,
       excludedManuscriptIds
     );
+    expectedManuscriptId = targetManuscriptId || queueItem.manuscriptId;
     await waitForReviewerArticle(page);
 
     manuscript = await readManuscriptIdentity(page);
-    if (!manuscript.manuscriptId) {
-      manuscript.manuscriptId = queueItem.rowText
-        ?.match(/\b([A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?)\b/i)?.[1]
-        ?.toUpperCase() || null;
-    }
     stage = "reading_article";
-    if (targetManuscriptId && manuscript.manuscriptId !== targetManuscriptId) {
-      throw new Error(`Otworzono ${manuscript.manuscriptId || "nieznany artykuł"} zamiast ${targetManuscriptId}.`);
+    if (!manuscript.manuscriptId || manuscript.manuscriptId !== expectedManuscriptId) {
+      throw new Error(`Otworzono ${manuscript.manuscriptId || "nieznany artykuł"} zamiast ${expectedManuscriptId}.`);
     }
     await log("article_opened", {
       ...manuscript,
@@ -549,7 +547,7 @@ async function runOneReviewerManuscript(page, {
       return result;
     }
 
-    const initialReviewers = await readAllReviewerList(page, log);
+    const initialReviewers = await readAllReviewerList(page, log, { restorePage: false });
     const initialCount = countReviewersTowardTarget(initialReviewers);
     await log("reviewer_list_initial", summarizeReviewerList(initialReviewers, initialCount));
 
@@ -597,7 +595,7 @@ async function runOneReviewerManuscript(page, {
       return result;
     }
 
-    const beforeInviteReviewers = await readAllReviewerList(page, log);
+    const beforeInviteReviewers = await readAllReviewerList(page, log, { restorePage: false });
     const reviewersToInvite = reviewersPendingInvitation(beforeInviteReviewers);
     const beforeInviteCounters = await readArticleCounters(page);
     await log("selection_target_reached", {
@@ -660,30 +658,12 @@ async function runOneReviewerManuscript(page, {
       manuscriptId: manuscript.manuscriptId,
     });
 
-    const afterInviteCounters = await readArticleCounters(page);
-    let afterInviteReviewers = [];
-    let confirmation = confirmInvitationsSent({
+    const confirmation = await waitForInvitationConfirmation(page, {
+      manuscriptId: manuscript.manuscriptId,
       beforeCounters: beforeInviteCounters,
-      afterCounters: afterInviteCounters,
-      afterReviewers: afterInviteReviewers,
       expected: reviewersToInvite,
+      log,
     });
-
-    if (confirmation.confirmed) {
-      await log("invite_all_reviewer_list_not_required", {
-        reason: "invited_counter_increase_confirmed",
-        invitedIncrease: confirmation.invitedIncrease,
-        expectedCount: confirmation.expectedCount,
-      });
-    } else {
-      afterInviteReviewers = await readAllReviewerList(page, log);
-      confirmation = confirmInvitationsSent({
-        beforeCounters: beforeInviteCounters,
-        afterCounters: afterInviteCounters,
-        afterReviewers: afterInviteReviewers,
-        expected: reviewersToInvite,
-      });
-    }
     await log("invite_all_verification", confirmation);
 
     if (!confirmation.confirmed) {
@@ -706,7 +686,7 @@ async function runOneReviewerManuscript(page, {
   } catch (error) {
     error.reviewerContext ||= {
       stage,
-      manuscriptId: manuscript?.manuscriptId || targetManuscriptId,
+      manuscriptId: expectedManuscriptId,
       queueLabel,
     };
     throw error;
@@ -1150,15 +1130,16 @@ async function openReviewerArticleFromQuickSearch(page, manuscriptId, log) {
   };
 }
 
-async function findQuickSearchReviewerAction(page, manuscriptId) {
+export async function findQuickSearchReviewerAction(page, manuscriptId) {
   return page.evaluate(({ selector, targetId }) => {
     const normalize = (value) => (value || "").toUpperCase().replace(/\s+/g, "");
     const target = normalize(targetId);
     const actions = Array.from(document.querySelectorAll(selector));
     for (let index = 0; index < actions.length; index += 1) {
       const select = actions[index];
-      const rowText = normalize(select.closest("tr")?.innerText || select.closest("tr")?.textContent);
-      if (!rowText.includes(target)) continue;
+      const rowText = (select.closest("tr")?.innerText || select.closest("tr")?.textContent || "").toUpperCase();
+      const rowIds = rowText.match(/\b[A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?\b/g) || [];
+      if (rowIds.length !== 1 || rowIds[0] !== target) continue;
       const preferredLabels = ["Invite Reviewers", "Assign Reviewers", "Select Reviewers", "View Details"];
       for (const label of preferredLabels) {
         const option = Array.from(select.options).find((candidate) =>
@@ -1171,7 +1152,7 @@ async function findQuickSearchReviewerAction(page, manuscriptId) {
   }, { selector: REVIEWER_SELECTORS.queueAction, targetId: manuscriptId }).catch(() => null);
 }
 
-async function openReviewerArticle(
+export async function openReviewerArticle(
   page,
   log,
   queueLabel,
@@ -1261,11 +1242,14 @@ async function openReviewerArticleOnCurrentQueuePage(
         .replace(/\s+/g, " ")
         .trim()
     );
-    if (targetManuscriptId && !rowText.toUpperCase().includes(targetManuscriptId.toUpperCase())) {
+    const rowIds = rowText.toUpperCase().match(/\b[A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?\b/g) || [];
+    if (rowIds.length !== 1) continue;
+    const manuscriptId = rowIds[0];
+    if (targetManuscriptId && manuscriptId !== targetManuscriptId.toUpperCase()) {
       continue;
     }
     const excludedManuscriptId = excludedManuscriptIds.find((manuscriptId) =>
-      rowText.toUpperCase().includes(manuscriptId.toUpperCase())
+      rowIds[0] === manuscriptId.toUpperCase()
     );
     if (excludedManuscriptId) {
       await log("queue_article_skipped_deferred", {
@@ -1286,7 +1270,7 @@ async function openReviewerArticleOnCurrentQueuePage(
     const navigation = waitForNavigation(page, 15_000);
     await action.selectOption(target.value);
     await navigation;
-    return { index, pageValue, rowText };
+    return { index, pageValue, rowText, manuscriptId };
   }
   await log("queue_page_scanned", {
     queueLabel,

@@ -40,7 +40,8 @@ export async function navigateToAdminQueue(page, queueLabel) {
   await page.waitForLoadState("domcontentloaded").catch(() => undefined);
   await dismissCookieBanner(page);
 
-  if ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel)) {
+  if (await isAdminQueueEmpty(page, queueLabel) ||
+      ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel))) {
     return true;
   }
 
@@ -104,7 +105,8 @@ export async function navigateToAdminQueue(page, queueLabel) {
     url: page.url(),
   });
 
-  if ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel)) {
+  if (await isAdminQueueEmpty(page, queueLabel) ||
+      ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel))) {
     return true;
   }
 
@@ -173,6 +175,12 @@ export async function isCompleteChecklistQueueEmpty(page) {
 }
 
 export async function isAdminQueueEmpty(page, queueLabel) {
+  if (await isCurrentAdminQueue(page, queueLabel) && await countViewDetailsControls(page) === 0) {
+    const emptyMessage = await page.locator("body").innerText().catch(() => "");
+    if (/\bno\s+manuscripts\s+(?:(?:are|were)\s+)?(?:in\s+this\s+queue|found)|\b0\s*-\s*0\s+of\s+0\b/i.test(emptyMessage)) {
+      return true;
+    }
+  }
   return page.evaluate(() => {
     const text = (document.body?.innerText || "").replace(/\s+/g, " ").trim();
     return text;
@@ -241,6 +249,7 @@ export async function openNextUnseenViewDetails(page, seenManuscriptIds) {
 }
 
 export async function openNextUnseenViewDetailsAcrossQueuePages(page, seenManuscriptIds) {
+  if (await isAdminQueueEmpty(page, ctx.config.assessmentQueueLabel || "Complete Checklist")) return false;
   const visitedQueuePages = new Set();
   const maxQueuePageHops = ctx.config.scanAllMetadata
     ? 500
@@ -296,6 +305,7 @@ export async function openNextUnseenViewDetailsAcrossQueuePages(page, seenManusc
 }
 
 export async function openViewDetailsByManuscriptIdAcrossQueuePages(page, manuscriptId) {
+  if (await isAdminQueueEmpty(page, ctx.config.assessmentQueueLabel || "Complete Checklist")) return false;
   const targetId = normalizeManuscriptId(manuscriptId);
   const visitedQueuePages = new Set();
 
@@ -312,7 +322,8 @@ export async function openViewDetailsByManuscriptIdAcrossQueuePages(page, manusc
         .some((option) => /view\s+details/i.test(option.textContent || "")));
       return selects.findIndex((select) => {
         const rowText = (select.closest("tr")?.innerText || "").toUpperCase();
-        return rowText.includes(expectedId);
+        const rowIds = rowText.match(/\b[A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?\b/g) || [];
+        return rowIds.length === 1 && rowIds[0] === expectedId;
       });
     }, targetId).catch(() => -1);
 
@@ -320,6 +331,60 @@ export async function openViewDetailsByManuscriptIdAcrossQueuePages(page, manusc
     const advanced = await advanceQueueListPage(page);
     if (!advanced.advanced) return false;
     await ensureManuscriptListReady(page);
+  }
+
+  return false;
+}
+
+// Otwiera konkretną akcję z dropdownu właściwego manuskryptu. ScholarOne po
+// przypisaniu EIC i AE przenosi REJECT do kolejki Select Reviewers; na stronie
+// artykułu nie ma wtedy zakładki Immediate Decision, ale pozostaje ona dostępna
+// bezpośrednio w dropdownie kolejki.
+export async function openManuscriptTabByIdAcrossQueuePages(
+  page,
+  manuscriptId,
+  tabPattern,
+  { navigationTimeout = 12_000, queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist" } = {}
+) {
+  if (await isAdminQueueEmpty(page, queueLabel)) return false;
+  const targetId = normalizeManuscriptId(manuscriptId);
+  const visitedQueuePages = new Set();
+
+  for (let hop = 0; hop < 500; hop += 1) {
+    const pageInfo = await readQueuePageInfo(page);
+    const queuePageKey = pageInfo?.selectedValue || pageInfo?.selectedLabel || `unknown-${hop}`;
+    if (visitedQueuePages.has(queuePageKey)) return false;
+    visitedQueuePages.add(queuePageKey);
+
+    const target = await page.evaluate(({ expectedId, tabSource }) => {
+      const regex = new RegExp(tabSource, "i");
+      const selects = Array.from(
+        document.querySelectorAll("select[name^='SEL_MANUSCRIPT_DETAILS_JUMP_TO_TAB_']")
+      );
+      for (let index = 0; index < selects.length; index += 1) {
+        const select = selects[index];
+        const rowText = (select.closest("tr")?.innerText || "").toUpperCase();
+        const rowIds = rowText.match(/\b[A-Z][A-Z0-9]+-\d{2}-\d{3,6}(?:\.R\d+)?\b/g) || [];
+        if (rowIds.length !== 1 || rowIds[0] !== expectedId) continue;
+        const option = Array.from(select.options).find((candidate) =>
+          regex.test((candidate.textContent || "").replace(/\s+/g, " ").trim())
+        );
+        if (option) return { index, value: option.value };
+      }
+      return null;
+    }, { expectedId: targetId, tabSource: tabPattern.source }).catch(() => null);
+
+    if (target) {
+      const select = page.locator(REJECT_SELECTORS.queueAction).nth(target.index);
+      const navigation = waitForNavigationOrTimeout(page, navigationTimeout);
+      await select.selectOption(target.value);
+      await navigation;
+      return true;
+    }
+
+    const advanced = await advanceQueueListPage(page, queueLabel);
+    if (!advanced.advanced) return false;
+    await ensureManuscriptListReady(page, queueLabel);
   }
 
   return false;
@@ -376,7 +441,7 @@ export async function readQueuePageInfo(page) {
   }).catch(() => null);
 }
 
-export async function advanceQueueListPage(page) {
+export async function advanceQueueListPage(page, queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist") {
   const before = await readQueuePageInfo(page);
   if (!before?.nextValue) {
     return {
@@ -387,7 +452,7 @@ export async function advanceQueueListPage(page) {
     };
   }
 
-  const pageChange = await goToQueueListPage(page, before.nextValue);
+  const pageChange = await goToQueueListPage(page, before.nextValue, true, queueLabel);
   return {
     advanced: pageChange.changed,
     reason: pageChange.reason,
@@ -398,7 +463,8 @@ export async function advanceQueueListPage(page) {
   };
 }
 
-export async function goToQueueListPage(page, targetPageValue, retryAfterLogin = true) {
+export async function goToQueueListPage(page, targetPageValue, retryAfterLogin = true,
+  queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist") {
   const before = await readQueuePageInfo(page);
   const targetValue = String(targetPageValue);
   if (!before) {
@@ -423,6 +489,7 @@ export async function goToQueueListPage(page, targetPageValue, retryAfterLogin =
     };
   }
 
+  const navigation = waitForNavigationOrTimeout(page, 12000);
   let submitted = false;
   try {
     submitted = await page.evaluate((targetValue) => {
@@ -488,22 +555,23 @@ export async function goToQueueListPage(page, targetPageValue, retryAfterLogin =
     };
   }
 
-  await waitForNavigationOrTimeout(page, 12000);
+  await navigation;
 
   if (await isLoginPage(page)) {
     await ctx.ensureLoggedIn(page, { reason: "queue-page-advance" });
-    await ensureManuscriptListReady(page);
+    await ensureManuscriptListReady(page, queueLabel);
 
     const afterLogin = await readQueuePageInfo(page);
     if (retryAfterLogin && afterLogin?.selectedValue !== targetValue) {
-      return goToQueueListPage(page, targetValue, false);
+      return goToQueueListPage(page, targetValue, false, queueLabel);
     }
   }
 
   const after = await readQueuePageInfo(page);
 
   return {
-    changed: true,
+    changed: after?.selectedValue === targetValue,
+    reason: after?.selectedValue === targetValue ? null : "Server did not return the requested queue page.",
     fromValue: before.selectedValue,
     fromLabel: before.selectedLabel,
     toValue: targetValue,
@@ -718,24 +786,25 @@ export async function goToNextDocument(page) {
   return true;
 }
 
-export async function ensureManuscriptListReady(page) {
+export async function ensureManuscriptListReady(page, queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist") {
   await page.waitForLoadState("domcontentloaded");
   await dismissCookieBanner(page);
 
-  if ((await countViewDetailsControls(page)) > 0) {
+  if (await isAdminQueueEmpty(page, queueLabel) ||
+      ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel))) {
     return;
   }
 
   if (await isLoginPage(page)) {
     await ctx.ensureLoggedIn(page, { reason: "queue" });
-    if ((await countViewDetailsControls(page)) > 0) {
+    if (await isAdminQueueEmpty(page, queueLabel) ||
+        ((await countViewDetailsControls(page)) > 0 && await isCurrentAdminQueue(page, queueLabel))) {
       return;
     }
   }
 
-  const queueLabel = ctx.config.assessmentQueueLabel || "Complete Checklist";
   const navigated = await navigateToAdminQueue(page, queueLabel);
-  if (navigated && (await countViewDetailsControls(page)) > 0) {
+  if (navigated && ((await countViewDetailsControls(page)) > 0 || await isAdminQueueEmpty(page, queueLabel))) {
     return;
   }
 

@@ -6,6 +6,8 @@ import {
   countSaveAndSendControls,
   fillRejectEmailBody,
   pageHasEmailBody,
+  submitRejectDecision,
+  findSaveAndSendControl,
 } from "../src/steps/reject-email.js";
 import { isNoRejectControlChecklistResult } from "../src/steps/checklist.js";
 
@@ -35,6 +37,29 @@ test("rozpoznaje przycisk Reject po obrazku reject.gif", async () => {
   );
   // Zarówno link, jak i obrazek w środku są rozpoznawane jako kontrolka.
   assert.equal(count, 2);
+});
+
+test("waits for Save and Send when the email body loads before the toolbar", async () => {
+  await withPage(`<textarea name="EMAIL_TEMPLATE_BODY">Message</textarea>
+    <script>setTimeout(() => {
+      const button = document.createElement('button');
+      button.id = 'emailPopupSaveButton';
+      button.textContent = 'Save and Send';
+      document.body.append(button);
+    }, 75);</script>`, async (page) => {
+    const target = await findSaveAndSendControl(page, { timeout: 500 });
+    assert.ok(target, "the toolbar can load after the message field");
+    assert.equal(await target.locator.innerText(), "Save and Send");
+  });
+});
+
+test("ignores hidden Save and Send controls while the visible toolbar loads", async () => {
+  await withPage(`<button id="emailPopupSaveButton" hidden>Save and Send</button>
+    <iframe srcdoc='<button id="emailPopupSaveButton">Save and Send</button>'></iframe>`, async (page) => {
+    const target = await findSaveAndSendControl(page, { timeout: 500 });
+    assert.ok(target);
+    assert.equal(await target.locator.isVisible(), true);
+  });
 });
 
 test("rozpoznaje Reject po dokładnej etykiecie i po onclick", async () => {
@@ -83,6 +108,27 @@ test("brak kontrolki Reject jest rozpoznawany jako stan nieakcjonowalny", () => 
     }),
     false
   );
+});
+
+test("nie wybiera szerokiego linku strony przez zagnieżdżoną ikonę Reject", async () => {
+  const result = await withPage(
+    `<form action="about:blank">
+       <input type="hidden" name="XIK_PREACT">
+       <a id="page-shell" href="javascript:setNextPage('MANUSCRIPT_DETAILS')"
+          style="display:block;width:700px;height:120px">
+         Admin Checklist <span>This will immediately reject the manuscript.</span>
+         <span><img src="/images/reject.gif" alt="Reject"></span>
+       </a>
+       <a id="real-reject"
+          href="javascript:setField('XIK_PREACT','REAL_REJECT');setNextPage('MANUSCRIPT_DETAILS')"
+          style="display:inline-block;width:60px;height:20px">Reject</a>
+     </form>`,
+    submitRejectDecision
+  );
+
+  assert.equal(result.submitted, true);
+  assert.ok(result.fieldsSet.includes("XIK_PREACT"), "musi wybrać właściwą akcję Reject");
+  assert.match(result.linkLabel, /REAL_REJECT/);
 });
 
 test("wykrywa pole treści maila", async () => {

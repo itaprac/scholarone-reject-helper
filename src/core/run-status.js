@@ -1,6 +1,20 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
+const FAILED_RESULT_STATUSES = new Set([
+  "assessment_batch_completed_with_errors", "action_failed", "failed",
+  "reject_step_failed", "save_send_failed", "needs_manual_review",
+  "needs_manual_check", "id_mismatch", "attempt_limit_reached",
+  "login_interrupted_open_details",
+]);
+
+export function workflowResultFailed(result) {
+  return FAILED_RESULT_STATUSES.has(result?.status) ||
+    Number(result?.summary?.actionErrors) > 0 ||
+    Number(result?.summary?.assessmentErrors) > 0 ||
+    Boolean(result?.results?.some((entry) => FAILED_RESULT_STATUSES.has(entry.status)));
+}
+
 // Puls bieżącego przebiegu w logs/current-run.json. Plik JSONL opisuje pełną
 // historię, ale nie mówi, czy proces nadal żyje ani który przebieg jest
 // najnowszy — panel potrzebuje jednego pliku o stałej nazwie z PID-em.
@@ -79,11 +93,12 @@ export function createRunStatus({ logsDir, runId, pid, mode, logFile }) {
       }
 
       if (type === "run_finished") {
-        status.status = "finished";
+        status.status = workflowResultFailed(payload) ? "failed" : "finished";
         status.resultStatus = typeof payload.status === "string" ? payload.status : null;
         status.finishedAt = at;
       } else if (type === "run_failed") {
         status.status = "failed";
+        status.resultStatus = typeof payload.status === "string" ? payload.status : null;
         status.finishedAt = at;
       }
 

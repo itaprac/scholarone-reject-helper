@@ -24,6 +24,7 @@ export async function addReviewersToTarget(page, { target, initialReviewers, log
   const skipped = [];
   let reviewers = initialReviewers;
   let count = countReviewersTowardTarget(reviewers);
+  let consecutiveNotAdded = 0;
 
   while (count < target) {
     const candidate = await findNextEligibleCandidate(page, reviewers, [...added, ...skipped], log);
@@ -46,15 +47,26 @@ export async function addReviewersToTarget(page, { target, initialReviewers, log
         count = countReviewersTowardTarget(reviewers);
       }
       skipped.push(candidate);
+      consecutiveNotAdded = error.reason === "candidate_not_added" ? consecutiveNotAdded + 1 : 0;
       await log("candidate_skipped", {
         candidate: publicPerson(candidate),
         reason: error.reason,
         similarAccounts: error.similarAccounts?.map(publicPerson) || [],
         confirmation: error.confirmation || null,
         skipped: skipped.length,
+        consecutiveNotAdded,
       });
+      if (consecutiveNotAdded >= 3) {
+        const systemicError = new Error(
+          "Trzy kolejne przyciski Add nie otworzyły działającego popupu i nie zmieniły Reviewer List. " +
+          "Zatrzymuję dobór kandydatów zamiast mielić całą pulę."
+        );
+        systemicError.code = "REVIEWER_ADD_SYSTEMIC_FAILURE";
+        throw systemicError;
+      }
       continue;
     }
+    consecutiveNotAdded = 0;
     added.push(candidate);
     const nextCount = countReviewersTowardTarget(reviewers);
     if (nextCount <= count) {
@@ -157,6 +169,14 @@ export async function addCandidate(page, candidate, log, refreshCurrentReviewerT
       await handleCreateAccountPopup(popup, candidate, log);
     } catch (error) {
       popupError = error;
+      if (!popup.isClosed()) {
+        const closed = await popup.close().then(() => true).catch(() => popup.isClosed());
+        await log("create_account_popup_closed_after_error", {
+          candidate: publicPerson(candidate),
+          closed,
+          reason: error.message,
+        });
+      }
     }
     await page.bringToFront().catch(() => undefined);
     try {
@@ -322,9 +342,22 @@ export async function handleCreateAccountPopup(popup, candidate, log) {
     await popup.waitForTimeout(500).catch(() => undefined);
   }
   if (!popup.isClosed()) {
-    throw new Error(`Popup Create Account nie zamknął się po dodaniu ${candidate.name}.`);
+    await closeStalledCreateAccountPopup(popup, candidate, log);
   }
   await log("create_account_popup_closed", { candidate: publicPerson(candidate) });
+}
+
+export async function closeStalledCreateAccountPopup(popup, candidate, log) {
+  const bodyText = await popup.locator("body").innerText().catch(() => "");
+  await log("create_account_popup_stalled", {
+    candidate: publicPerson(candidate),
+    message: bodyText.replace(/\s+/g, " ").trim().slice(0, 500),
+  });
+  const closed = await popup.close().then(() => true).catch(() => popup.isClosed());
+  if (!closed && !popup.isClosed()) {
+    throw new Error(`Nie udało się zamknąć zawieszonego popupu dla ${candidate.name}.`);
+  }
+  await log("create_account_popup_closed_after_stall", { candidate: publicPerson(candidate) });
 }
 
 export function createAccountBlockingReason(bodyText) {
@@ -391,7 +424,7 @@ export async function readPopupAddOptions(popup) {
 export async function confirmCandidateAdded(page, candidate, beforeReviewers, log, refreshCurrentReviewerTask = async () => false) {
   let reviewers = beforeReviewers;
   for (let attempt = 1; attempt <= 8; attempt += 1) {
-    reviewers = await readAllReviewerList(page, log);
+    reviewers = await readAllReviewerList(page, log, { restorePage: false });
     const match = reviewers.find((reviewer) => samePerson(candidate, reviewer));
     if (match) {
       await log("candidate_confirmed_in_reviewer_list", {
@@ -408,7 +441,7 @@ export async function confirmCandidateAdded(page, candidate, beforeReviewers, lo
         url: page.url(),
       });
       await refreshCurrentReviewerTask(page, log, "candidate_confirmation");
-    } else {
+    } else if (attempt < 8) {
       await page.waitForTimeout(1500);
     }
   }
@@ -438,11 +471,14 @@ export async function confirmCandidateAdded(page, candidate, beforeReviewers, lo
 export function candidateAddConfirmationState(beforeReviewers, afterReviewers) {
   const before = Array.isArray(beforeReviewers) ? beforeReviewers : [];
   const after = Array.isArray(afterReviewers) ? afterReviewers : [];
-  const sameRoster = before.length === after.length && before.every((previous) =>
-    after.some((current) =>
-      Boolean(previous?.id && current?.id && previous.id === current.id) || samePerson(previous, current)
-    )
-  );
+  const matchedRecords = new Set();
+  const sameRoster = before.length === after.length && before.every((previous) => {
+    const index = after.findIndex((current, index) => !matchedRecords.has(index) &&
+      (previous?.id && current?.id ? previous.id === current.id : samePerson(previous, current)));
+    if (index < 0) return false;
+    matchedRecords.add(index);
+    return true;
+  });
   return {
     rosterUnchanged: sameRoster,
     beforeTotal: before.length,

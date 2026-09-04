@@ -5,6 +5,9 @@ import {
   isAdminQueueEmpty,
   isCompleteChecklistQueueEmpty,
   isCurrentAdminQueue,
+  ensureManuscriptListReady,
+  setQueueContext,
+  openNextUnseenViewDetailsAcrossQueuePages,
 } from "../src/steps/queue.js";
 
 test("recognizes a zero-count Complete Checklist queue on Admin Center", async () => {
@@ -22,6 +25,38 @@ test("recognizes a zero-count Complete Checklist queue on Admin Center", async (
     `);
     assert.equal(await isCompleteChecklistQueueEmpty(page), true);
   } finally {
+    await browser.close();
+  }
+});
+
+test("does not scan another queue when the requested queue has zero manuscripts", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<input name="CURRENT_PAGE" value="ADMIN_VIEW_MANUSCRIPTS">
+      <b>Select Reviewers</b><p>0 Complete Checklist</p>
+      <table><tr><td>KES-26-9999</td><td><select name="SEL_MANUSCRIPT_DETAILS_JUMP_TO_TAB_1">
+      <option>View Details</option></select></td></tr></table>`);
+    setQueueContext({ config: { maxChecked: 10, assessmentQueueLabel: "Complete Checklist" } });
+    await ensureManuscriptListReady(page);
+    assert.equal(await openNextUnseenViewDetailsAcrossQueuePages(page, new Set()), false);
+  } finally {
+    setQueueContext({ config: {} });
+    await browser.close();
+  }
+});
+
+test("finishes an empty EIC queue without reporting missing View Details", async () => {
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<input name="CURRENT_PAGE" value="ADMIN_VIEW_MANUSCRIPTS">
+      <b>Awaiting EIC Assignment</b><p>No manuscripts are in this queue.</p>`);
+    setQueueContext({ config: { assessmentQueueLabel: "Awaiting EIC Assignment" } });
+    assert.equal(await isAdminQueueEmpty(page, "Awaiting EIC Assignment"), true);
+    await ensureManuscriptListReady(page);
+  } finally {
+    setQueueContext({ config: {} });
     await browser.close();
   }
 });

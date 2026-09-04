@@ -140,6 +140,7 @@ export async function runScreeningFromRun(page) {
         decision: decision.decision,
         reason: decision.reason,
         mode: decision.mode,
+        manuscriptId,
       });
       action.screenshot = await context.screenshots.proof(
         page,
