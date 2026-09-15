@@ -37,7 +37,7 @@ const envDefaults = loadEnvFile(path.join(projectRoot, ".env"));
 
 const jobs = new Map();
 let activeJobId = null;
-let nextJobId = 1;
+let nextJobId = Date.now();
 let scholarOneStatusCache = null;
 let scholarOneStatusRefresh = null;
 const scholarOneStatusCacheMs = 2 * 60 * 1000;
@@ -221,9 +221,30 @@ const server = http.createServer(async (req, res) => {
 
     const jobMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)$/);
     if (jobMatch && req.method === "GET") {
-      const job = jobs.get(jobMatch[1]);
+      const job = await readJob(jobMatch[1]);
       const since = Number.parseInt(url.searchParams.get("since") || "", 10);
       return sendJson(res, { job: publicJob(job, { since }) });
+    }
+
+    const jobMonitorMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/monitor$/);
+    if (jobMonitorMatch && req.method === "GET") {
+      const job = await readJob(jobMonitorMatch[1]);
+      if (!job) return sendJson(res, { error: "Job not found." }, 404);
+      const current = await readCliRun(2000);
+      if (job.pid && current.run?.pid === job.pid &&
+          new Date(current.run.startedAt) >= new Date(job.startedAt)) {
+        return sendJson(res, { ...current, run: { ...current.run, status: current.run.effectiveStatus } });
+      }
+      const filename = job.logFile || job.output?.match(/^Log: (.+\.jsonl)\s*$/m)?.[1];
+      if (filename) {
+        const archive = await readArchivedRun(path.basename(filename), 2000).catch(() => null);
+        if (archive) return sendJson(res, archive);
+      }
+      return sendJson(res, {
+        run: { status: job.status, mode: job.type, startedAt: job.startedAt,
+          finishedAt: job.finishedAt, checked: job.progress?.checked, rejected: job.progress?.sent },
+        events: [], totalEvents: 0,
+      });
     }
 
     const streamMatch = url.pathname.match(/^\/api\/jobs\/([^/]+)\/stream$/);
@@ -300,6 +321,8 @@ async function listReports() {
       progressPath: fs.existsSync(progressPath) ? relativeProjectPath(progressPath) : null,
       createdAt: payload?.createdAt || stat.mtime.toISOString(),
       status: result.status || "",
+      live: payload?.config?.saveAndSend === true,
+      rejected: summary.rejected || result.rejected || 0,
       checked: summary.checked || 0,
       candidates: summary.wouldReject || 0,
       progressRejected: progressValues.filter((entry) => entry?.status === "sent").length,
@@ -638,6 +661,7 @@ function startJob(type, args, script = autoRejectScript) {
 
   const job = {
     id,
+    pid: child.pid,
     type,
     args,
     status: "running",
@@ -690,11 +714,16 @@ function startJob(type, args, script = autoRejectScript) {
       activeJobId = null;
     }
 
+    const current = await readJsonFile(path.join(projectRoot, "logs", "current-run.json"));
+    if (current?.pid === job.pid && new Date(current.startedAt) >= new Date(job.startedAt)) {
+      job.logFile = current.logFile;
+    }
+    await persistJob(job).catch((error) => console.error("Could not save job history:", error));
     broadcast(job, { type: "status", job: publicJob(job) });
     for (const response of job.subscribers) response.end();
     job.subscribers.clear();
 
-    await persistJob(job).catch(() => undefined);
+
   });
 
   return publicJob(job);
@@ -717,7 +746,12 @@ async function persistJob(job) {
   );
 }
 
-async function listJobHistory(limit = 20) {
+async function readJob(id) {
+  if (!/^\d+$/.test(id)) return null;
+  return jobs.get(id) || readJsonFile(path.join(jobsDir, `${id}.json`));
+}
+
+async function listJobHistory() {
   const files = await fsp.readdir(jobsDir).catch(() => []);
   const entries = [];
 
@@ -735,9 +769,12 @@ async function listJobHistory(limit = 20) {
     });
   }
 
-  return entries
-    .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt))
-    .slice(0, limit);
+  const history = new Map(entries.map((job) => [job.id, job]));
+  for (const job of jobs.values()) {
+    const { output: _output, ...summary } = publicJob(job);
+    history.set(job.id, summary);
+  }
+  return [...history.values()].sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
 }
 
 function publicJob(job, { since = Number.NaN } = {}) {
@@ -750,6 +787,8 @@ function publicJob(job, { since = Number.NaN } = {}) {
 
   return {
     id: job.id,
+    pid: job.pid,
+    logFile: job.logFile,
     type: job.type,
     args: job.args,
     status: job.status,

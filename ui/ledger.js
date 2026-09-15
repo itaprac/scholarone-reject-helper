@@ -15,7 +15,7 @@
     details: new Map(), // rowId -> loaded detail (run, archive log)
     decisionFilter: {},
     drawerWf: null,
-    // Expanded running job: "monitor" (beacon, tiles, events) or raw "log".
+    // Expanded job: "monitor" (beacon, tiles, events) or raw "log".
     jobView: localStorage.getItem("s1.ledger.jobView") || "monitor",
   };
   const $ = (id) => document.getElementById(id);
@@ -134,13 +134,14 @@
     const jobRunning = S.jobRunning(job);
     const cli = S.state.cliRun;
 
-    if (jobRunning) {
+    if (job) {
       rows.push({
-        id: `job:${job.id}`, when: job.startedAt, kind: "job", live: true, wfKey: wfKeyForJob(job.type),
+        id: `job:${job.id}`, when: job.startedAt, kind: "job", live: jobRunning, wfKey: wfKeyForJob(job.type),
         label: S.jobLabel(job.type).split(", ")[0], mode: S.jobLabel(job.type).split(", ")[1] || job.status,
-        outcome: S.progressText(job.progress) || job.status, sub: "started from this panel", path: "live", job,
+        outcome: S.progressText(job.progress) || job.status, sub: jobRunning ? "started from this panel" : job.status, path: jobRunning ? "live" : job.status, job,
       });
-    } else if (cli?.effectiveStatus === "running") {
+    }
+    if (!jobRunning && cli?.effectiveStatus === "running") {
       rows.push({
         id: `cli:${cli.runId}`, when: cli.startedAt, kind: "cli", live: true, wfKey: cli.mode === "reviewers" ? "reviewers" : "reject",
         label: cli.mode === "reviewers" ? "Reviewers" : cli.mode || "Run", mode: "running from CLI",
@@ -169,14 +170,14 @@
 
     for (const report of S.state.reports) {
       const candidates = report.candidates || 0;
-      const sent = report.progressRejected || 0;
-      const liveReport = /reject_finished|max_rejected_reached/.test(report.status);
+      const sent = Math.max(report.rejected || 0, report.progressRejected || 0);
+      const liveReport = report.live ?? ((report.rejected || 0) > 0 || /reject_finished|max_rejected_reached/.test(report.status));
       rows.push({
-        id: `report:${report.path}`, when: report.createdAt, kind: "report", report, wfKey: "reject", label: "Auto-reject",
+        id: `report:${report.path}`, when: report.createdAt, kind: "report", report: { ...report, sent }, wfKey: "reject", label: "Auto-reject report",
         mode: liveReport ? "live" : "dry run",
         outcome: `${report.checked} checked · ${candidates} candidates${sent ? ` · ${sent} sent` : ""}`,
         sub: S.reportStatusLabel(report.status),
-        path: candidates === 0 ? "empty" : sent >= candidates || liveReport ? "executed" : "review",
+        path: candidates === 0 ? "empty" : sent >= candidates ? "executed" : "review",
         pending: Math.max(0, candidates - sent),
       });
     }
@@ -193,11 +194,11 @@
     }
 
     for (const job2 of S.state.jobs) {
-      if (job2.status !== "failed" || (job && job.id === job2.id)) continue;
+      if (job && job.id === job2.id) continue;
       rows.push({
-        id: `job:${job2.id}`, when: job2.startedAt, kind: "failedjob", job: job2, wfKey: wfKeyForJob(job2.type),
+        id: `job:${job2.id}`, when: job2.startedAt, kind: "job", job: job2, wfKey: wfKeyForJob(job2.type),
         label: S.jobLabel(job2.type).split(", ")[0], mode: S.jobLabel(job2.type).split(", ")[1] || "",
-        outcome: `failed, exit ${job2.exitCode ?? "?"}`, sub: S.progressText(job2.progress), path: "failed",
+        outcome: job2.status, sub: S.progressText(job2.progress), path: job2.status,
       });
     }
 
@@ -215,6 +216,7 @@
     const step = (label, attrs = {}, mark = "") => el("span", { class: "step", dataset: attrs }, el("i", {}, mark), label);
     if (row.path === "live") return el("div", { class: "steps" }, step("running", { live: "true" }, "●"));
     if (row.path === "failed") return el("div", { class: "steps" }, step("failed", { bad: "true" }, "!"));
+    if (row.kind === "job") return el("div", { class: "steps" }, step(row.job.status, { done: String(row.job.status === "finished") }));
     if (row.path === "unknown") return el("div", { class: "steps" }, step(row.mode, { done: "true" }, "✓"), step("loading…"));
     if (row.path === "empty") return el("div", { class: "steps" }, step(row.mode, { done: "true" }, "✓"), step("nothing to do", { done: "true" }, "✓"));
     if (row.kind === "log") return el("div", { class: "steps" }, step("invited", { done: "true" }, "✓"));
@@ -276,6 +278,18 @@
   function detailFor(row) {
     const box = el("div", { class: "detail" });
     if (row.kind === "job") {
+      const loaded = ui.details.get(row.id);
+      if (!row.live && !loaded) {
+        loadJobDetail(row);
+        box.append(el("p", { class: "settings-note" }, "Loading job…"));
+        return box;
+      }
+      if (loaded?.error) {
+        box.append(el("p", {}, loaded.error), el("button", { class: "btn small", type: "button",
+          onclick: () => { ui.details.delete(row.id); renderLedger(); } }, "Retry"));
+        return box;
+      }
+      const job = row.live ? row.job : loaded.job;
       const views = [["monitor", "Monitor"], ["log", "Job log"]];
       const toolbar = meta(
         el("div", { class: "seg", role: "tablist" }, views.map(([value, label]) => el("button", {
@@ -286,21 +300,22 @@
       toolbar.classList.add("detail-toolbar");
       box.append(toolbar);
       if (ui.jobView === "log") {
-        const pre = el("pre", { class: "output", id: "jobOutput" }, row.job.output || "Job started…");
+        const pre = el("pre", { class: "output", id: "jobOutput" }, job.output || (row.live ? "Job started…" : "No saved output."));
         box.append(pre);
         requestAnimationFrame(() => { pre.scrollTop = pre.scrollHeight; });
       } else {
-        box.append(el("div", { id: "jobMonitor" }, S.monitorPanel()));
+        const target = el("div", { id: "jobMonitor" });
+        box.append(target);
+        if (row.live) {
+          renderJobMonitor(row, target);
+        } else {
+          target.append(S.monitorPanel({ archive: loaded.archive }));
+        }
       }
       return box;
     }
     if (row.kind === "cli") {
       box.append(el("div", { id: "jobMonitor" }, S.monitorPanel()));
-      return box;
-    }
-    if (row.kind === "failedjob") {
-      box.append(meta(`job ${row.job.id}`, `exit ${row.job.exitCode ?? "?"}`, S.progressText(row.job.progress)),
-        el("p", { class: "settings-note" }, "The full output of past jobs is not stored. Look for the matching run in the log list below or start the job again."));
       return box;
     }
     if (row.kind === "log") {
@@ -316,7 +331,7 @@
     }
     if (row.kind === "report") {
       const report = row.report;
-      box.append(meta(el("span", { class: "mono" }, report.path), `checked ${report.checked}`, `candidates ${report.candidates}`, `sent ${report.progressRejected || 0}`, report.progressSkipped ? `skipped ${report.progressSkipped}` : null),
+      box.append(meta(el("span", { class: "mono" }, report.path), `checked ${report.checked}`, `candidates ${report.candidates}`, `sent ${report.sent || 0}`, report.progressSkipped ? `skipped ${report.progressSkipped}` : null),
         el("div", { class: "exec-bar", dataset: { quiet: String(row.path !== "review") } },
           el("div", {}, el("b", {}, row.path === "review" ? `${row.pending} candidates waiting for rejection` : row.path === "empty" ? "No candidates in this report" : "All candidates handled"),
             el("span", {}, "Rejects only the candidates listed in the report file. Manuscripts already sent are skipped.")),
@@ -344,6 +359,41 @@
           el("span", {}, "Applies exactly these decisions. The model is not asked again; handled manuscripts are skipped.")),
         row.pending ? el("button", { class: "btn danger", type: "button", disabled: S.jobRunning(), onclick: () => S.executeRun(row.stage, row.run.filename, row.detail).catch(showError) }, "Execute these decisions") : null));
     return box;
+  }
+
+  const loadingJobs = new Set();
+  async function loadJobDetail(row) {
+    if (loadingJobs.has(row.id)) return;
+    loadingJobs.add(row.id);
+    try {
+      const [{ job }, archive] = await Promise.all([
+        S.api(`/api/jobs/${encodeURIComponent(row.job.id)}`),
+        S.api(`/api/jobs/${encodeURIComponent(row.job.id)}/monitor`),
+      ]);
+      if (!job) throw new Error("Job not found.");
+      ui.details.set(row.id, { job, archive });
+    } catch (error) {
+      ui.details.set(row.id, { error: error.message });
+    } finally {
+      loadingJobs.delete(row.id);
+      renderLedger();
+    }
+  }
+
+  async function renderJobMonitor(row, target) {
+    try {
+      const archive = await S.api(`/api/jobs/${encodeURIComponent(row.job.id)}/monitor`);
+      if (target.isConnected) target.replaceChildren(S.monitorPanel({ archive }));
+    } catch (error) {
+      if (!target.isConnected) return;
+      // Keep the active monitor available while the previous server finishes its job.
+      const started = new Date(S.state.cliRun?.startedAt) - new Date(row.job.startedAt);
+      if (!row.job.pid && started >= 0 && started < 10000) {
+        target.replaceChildren(S.monitorPanel());
+      } else {
+        target.textContent = error.message;
+      }
+    }
   }
 
   function assessmentRow(item) {
@@ -402,7 +452,7 @@
   });
   S.on("job-output", ({ chunk, job }) => {
     const pre = $("jobOutput");
-    if (!pre) return;
+    if (!pre || ui.expanded !== `job:${job.id}` || !S.jobRunning(job)) return;
     const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
     if (pre.textContent === "Job started…") pre.textContent = "";
     pre.textContent += chunk;
@@ -419,7 +469,11 @@
       return;
     }
     const jobMonitor = $("jobMonitor");
-    if (jobMonitor) jobMonitor.replaceChildren(S.monitorPanel());
+    if (jobMonitor) {
+      const row = buildRows().find((item) => item.id === ui.expanded);
+      if (row?.kind === "job" && row.live) renderJobMonitor(row, jobMonitor);
+      else if (row?.kind === "cli") jobMonitor.replaceChildren(S.monitorPanel());
+    }
   });
   S.on("monitor-history", renderLedger);
   S.on("settings", (note) => { const target = $("settingsNote"); if (target) target.textContent = note; });

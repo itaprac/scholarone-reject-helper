@@ -5,12 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>ScholarOne helper</title>
     <script>
-      // "/" opens the last used layout. "?layout=classic" keeps this page.
+      // Ledger is the default. Explicit layout links remain available.
       (() => {
-        const params = new URLSearchParams(location.search);
-        if (params.has("layout")) return;
-        const layout = localStorage.getItem("s1.layout") || "desk";
-        if (layout === "desk" || layout === "ledger") location.replace(`/${layout}.html`);
+        const layout = new URLSearchParams(location.search).get("layout");
+        if (layout === "classic") return;
+        location.replace(layout === "desk" ? "/desk.html" : "/ledger.html");
       })();
     </script>
     <link rel="stylesheet" href="/styles.css">
